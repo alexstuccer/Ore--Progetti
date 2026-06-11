@@ -803,8 +803,10 @@ document.getElementById('filein').addEventListener('change',ev=>{
 });
 
 /* ================= export righe ================= */
-function buildRows(includeExported){
-  const list=Object.values(entries).filter(e=>!e.permesso&&e.project&&e.label&&(includeExported||!e.exported));
+function buildRows(includeExported, from, to){
+  const list=Object.values(entries).filter(e=>!e.permesso&&e.project&&e.label
+    &&(includeExported||!e.exported)
+    &&(!from||e.day>=from)&&(!to||e.day<=to));
   const g={};
   for(const e of list){
     const k=e.day+'|'+e.project+'|'+e.label;
@@ -816,16 +818,17 @@ function buildRows(includeExported){
 }
 function openExport(){
   const root=document.getElementById('modalroot');
-  let inclExp=false;
+  let inclExp=false, dFrom='', dTo='';
   const draw=()=>{
-    const rows=buildRows(inclExp);
-    const rawN=Object.values(entries).filter(e=>!e.permesso&&!(e.project&&e.label)).length;
+    const rows=buildRows(inclExp, dFrom, dTo);
+    const rawN=Object.values(entries).filter(e=>!e.permesso&&!(e.project&&e.label)
+      &&(!dFrom||e.day>=dFrom)&&(!dTo||e.day<=dTo)).length;
     const tsv=rows.map(r=>[euDate(r.day),r.project,fmtOre(r.min),r.label,r.notes.join('; ')].join('\t')).join('\n');
     root.querySelector('#expbody').innerHTML=
-      (rawN?`<div class="warn">⚠ Hai <b>${rawN}</b> blocchi grigi non assegnati: non sono inclusi. Assegnali e riapri.</div>`:'')+
+      (rawN?`<div class="warn">⚠ Hai <b>${rawN}</b> blocchi grigi non assegnati${(dFrom||dTo)?' in questo periodo':''}: non sono inclusi. Assegnali e riapri.</div>`:'')+
       (rows.length?`<table class="exptable"><tr><th>Data</th><th>Progetto</th><th>Ore</th><th>Attività</th><th>Note</th></tr>`+
         rows.map(r=>`<tr><td class="mono">${euDate(r.day)}</td><td>${esc(r.project.split(' - ')[0])}</td><td class="mono">${fmtOre(r.min)}</td><td>${esc(r.label)}</td><td>${esc(r.notes.join('; '))}</td></tr>`).join('')+`</table>`
-        :'<div class="hint" style="margin:14px 0">Niente da esportare: tutto già copiato nel foglio.</div>')+
+        :`<div class="hint" style="margin:14px 0">${(dFrom||dTo)?'Niente da esportare in questo intervallo: o è già copiato, o è ancora da assegnare.':'Niente da esportare: tutto già copiato nel foglio.'}</div>`)+
       `<label class="hint" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="iexp" ${inclExp?'checked':''}> includi anche le righe già esportate</label>`;
     root.querySelector('#iexp').onchange=e=>{inclExp=e.target.checked;draw();};
     root.querySelector('#ecopy').disabled = root.querySelector('#ecopydone').disabled = root.querySelector('#erowx').disabled = !rows.length;
@@ -840,12 +843,29 @@ function openExport(){
   };
   root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:680px">
     <div class="mhead"><h2>Righe per il foglio</h2><button class="x" id="mx">×</button></div>
+    <div class="inline" style="align-items:flex-end">
+      <div class="frow" style="margin-bottom:8px"><label>Dal</label><input type="date" id="efrom"></div>
+      <div class="frow" style="margin-bottom:8px"><label>Al</label><input type="date" id="eto"></div>
+    </div>
+    <div class="chips" style="margin-bottom:12px">
+      <button type="button" class="chip" id="qweek">settimana visibile</button>
+      <button type="button" class="chip" id="qmonth">mese visibile</button>
+      <button type="button" class="chip" id="qall">tutto</button>
+      <span class="hint" style="align-self:center">vuoto = nessun limite</span>
+    </div>
     <div id="expbody"></div>
     <div class="mfoot"><button class="btn" id="ecopy">Copia righe</button>
       <button class="btn" id="erowx">Scarica .xlsx</button>
       <button class="btn primary" id="ecopydone">Copia e segna come fatte</button></div>
     <div class="hint">Formato: Data · Progetto · Ore · Attività · Note — pronto da incollare in Excel.</div>
   </div></div>`;
+  const setRange=(a,b)=>{ dFrom=a; dTo=b; root.querySelector('#efrom').value=a; root.querySelector('#eto').value=b; draw(); };
+  root.querySelector('#efrom').onchange=e=>{ dFrom=e.target.value; draw(); };
+  root.querySelector('#eto').onchange=e=>{ dTo=e.target.value; draw(); };
+  root.querySelector('#qweek').onclick=()=>setRange(dayKey(weekStart), dayKey(addDays(weekStart,6)));
+  root.querySelector('#qmonth').onclick=()=>{ const y=weekStart.getFullYear(), m=weekStart.getMonth();
+    setRange(dayKey(new Date(y,m,1)), dayKey(new Date(y,m+1,0))); };
+  root.querySelector('#qall').onclick=()=>setRange('','');
   root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
   root.querySelector('#ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') root.innerHTML=''; });
   draw();
