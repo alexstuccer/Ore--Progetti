@@ -60,8 +60,11 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .dhead .dtot .raw{color:var(--raw-border)}
 .day{border-right:1px solid var(--line);position:relative}
 .day:last-child{border-right:none}
-.day.today .dhead{box-shadow:inset 0 -2px 0 var(--accent)}
+.day.today .dhead{box-shadow:inset 0 -2px 0 var(--accent);background:#EAF3EF}
 .day.today .dn b{color:var(--accent-ink)}
+.day.today .dbody{background-color:#EFF6F2}
+.nowline{position:absolute;left:0;right:0;height:0;border-top:2px solid #D6453A;z-index:4;pointer-events:none}
+.nowline span{position:absolute;left:-1px;top:-5px;width:8px;height:8px;border-radius:50%;background:#D6453A}
 .dbody{position:relative;height:var(--colh);
   background-image:
     repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--slot)*4 - 1px), var(--line) calc(var(--slot)*4 - 1px), var(--line) calc(var(--slot)*4)),
@@ -81,6 +84,10 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .blk.raw .btx{color:#444b52}
 .blk.perm{background:repeating-linear-gradient(45deg,var(--perm-bg) 0 6px,#fff 6px 12px);border-color:var(--perm-border);border-left-width:4px}
 .blk .chk{position:absolute;bottom:1px;right:4px;font-size:9px;color:var(--accent-ink)}
+.rs{position:absolute;left:0;right:0;height:6px;z-index:3}
+.rs-t{top:0;cursor:ns-resize}
+.rs-b{bottom:0;cursor:ns-resize}
+.blk.dragging{opacity:.35;pointer-events:none}
 .ghost{position:absolute;left:3px;right:3px;background:var(--accent-soft);border:1px dashed var(--accent);border-radius:7px;pointer-events:none;z-index:5}
 
 /* ---------- first run ---------- */
@@ -126,6 +133,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .pgitem .pgn{font-size:11.5px;color:var(--ink);line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pgitem .star{color:var(--accent-ink);flex:none;font-size:11px}
 .pgother{justify-content:center;color:var(--muted);border-style:dashed;border-left-width:1px}
+.fsearch{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:var(--fui);margin-bottom:6px;background:#fff;color:var(--ink)}
 .permrow{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px dashed var(--perm-border);border-radius:8px;background:var(--perm-bg);cursor:pointer;font-size:13px}
 .permrow input{accent-color:var(--perm-border);width:16px;height:16px}
 .fulllist{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:6px;width:100%;background:#fff}
@@ -215,6 +223,7 @@ const addDays = (d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return x
 const monday = d => addDays(d, -((d.getDay()+6)%7));
 const addMonths = (d,n)=>{ const x=new Date(d); x.setMonth(x.getMonth()+n); return x; };
 let filterP='';
+let hoverEntryId=null, hoverSlot=null, clipBlock=null;
 function passFilter(e){
   if(!filterP) return true;
   if(filterP==='__raw') return !e.permesso && !(e.project&&e.label);
@@ -352,25 +361,28 @@ function renderAll(){
       const top=(e.start-DAY_START)/SLOT*SLOT_PX, h=Math.max(e.dur/SLOT*SLOT_PX-2,12);
       const time=fmtTime(e.start)+'–'+fmtTime(e.start+e.dur);
       if(e.permesso){
-        blocks+=`<div class="blk perm" style="top:${top}px;height:${h}px" data-id="${e.id}">
+        blocks+=`<div class="blk perm" style="top:${top}px;height:${h}px" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
           <span class="bt">${time}</span><div class="btx">${esc(e.text)||'Permesso'}</div><div class="bmeta">permesso · non va nel foglio</div></div>`;
       } else if(e.project && e.label){
         assigned+=e.dur;
         const c=projColor(e.project), code=e.project.split(' - ')[0];
-        blocks+=`<div class="blk" style="top:${top}px;height:${h}px;--pb:${c.bg};--pc:${c.ln}" data-id="${e.id}">
+        blocks+=`<div class="blk" style="top:${top}px;height:${h}px;--pb:${c.bg};--pc:${c.ln}" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
           <span class="bt">${time}</span><div class="btx">${esc(e.text)||esc(e.label)}</div>
           <div class="bmeta">${esc(code)} · ${esc(e.label)}</div>${e.exported?'<span class="chk" title="già esportata">✓</span>':''}</div>`;
       } else {
         raw+=e.dur;
-        blocks+=`<div class="blk raw" style="top:${top}px;height:${h}px" data-id="${e.id}">
+        blocks+=`<div class="blk raw" style="top:${top}px;height:${h}px" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
           <span class="bt">${time}</span><div class="btx">${esc(e.text)||'(senza testo)'}</div><div class="bmeta">da assegnare</div></div>`;
       }
     }
     wkAssigned+=assigned; wkRaw+=raw;
+    let nowHtml='';
+    if(k===todayK){ const n=new Date(); const mm=n.getHours()*60+n.getMinutes();
+      if(mm>=DAY_START&&mm<=DAY_END) nowHtml=`<div class="nowline" style="top:${((mm-DAY_START)/SLOT*SLOT_PX).toFixed(1)}px"><span></span></div>`; }
     const totTxt = (assigned?fmtOre(assigned)+' h':'')+(raw?` <span class="raw">+${fmtOre(raw)}?</span>`:'');
     html+=`<div class="day${k===todayK?' today':''}" data-day="${k}">
       <div class="dhead"><span class="dn">${DOW[(d.getDay()+6)%7]} <b>${d.getDate()}</b></span><span class="dtot">${totTxt||'&nbsp;'}</span></div>
-      <div class="dbody" data-day="${k}">${blocks}</div></div>`;
+      <div class="dbody" data-day="${k}">${blocks}${nowHtml}</div></div>`;
   }
   cal.innerHTML=html;
 
@@ -416,9 +428,26 @@ function buildFilterOptions(){
 function snap(y){ return DAY_START + Math.floor(y/SLOT_PX)*SLOT; }
 function bindCalendar(){
   document.querySelectorAll('.blk').forEach(el=>{
-    el.addEventListener('click',ev=>{ ev.stopPropagation(); openEditor(entries[el.dataset.id]); });
+    const id=el.dataset.id;
+    el.addEventListener('mouseenter',()=>{ hoverEntryId=id; });
+    el.addEventListener('mouseleave',()=>{ if(hoverEntryId===id) hoverEntryId=null; });
+    el.addEventListener('click',ev=>ev.stopPropagation());
+    el.addEventListener('mousedown',ev=>{
+      if(ev.button!==0) return;
+      ev.stopPropagation();
+      const ent=entries[id]; if(!ent) return;
+      const mode = ev.target.classList&&ev.target.classList.contains('rs')
+        ? (ev.target.classList.contains('rs-t')?'rt':'rb') : 'mv';
+      startBlockDrag(ev, ent, el, mode);
+    });
   });
   document.querySelectorAll('.dbody').forEach(col=>{
+    col.addEventListener('mousemove',ev=>{
+      const r=col.getBoundingClientRect();
+      hoverSlot={ day:col.dataset.day,
+        start:Math.max(DAY_START,Math.min(DAY_END-SLOT, DAY_START+Math.floor((ev.clientY-r.top)/SLOT_PX)*SLOT)) };
+    });
+    col.addEventListener('mouseleave',()=>{ if(hoverSlot&&hoverSlot.day===col.dataset.day) hoverSlot=null; });
     let dragStart=null, ghost=null;
     col.addEventListener('mousedown',ev=>{
       if(ev.target!==col) return;
@@ -450,6 +479,57 @@ function bindCalendar(){
     });
   });
 }
+
+/* trascinamento di un blocco: sposta (mv), ridimensiona dal bordo alto (rt) o basso (rb) */
+function startBlockDrag(ev, ent, el, mode){
+  ev.preventDefault();
+  const cols=[...document.querySelectorAll('.dbody')].map(c=>({el:c,day:c.dataset.day,rect:c.getBoundingClientRect()}));
+  const origin=cols.find(c=>c.day===ent.day);
+  const grabOff=origin ? (ev.clientY-origin.rect.top) - (ent.start-DAY_START)/SLOT*SLOT_PX : 0;
+  let dragging=false, ghost=null, target={day:ent.day,start:ent.start,dur:ent.dur};
+  const sx=ev.clientX, sy=ev.clientY;
+  const colAt=x=>cols.find(c=>x>=c.rect.left&&x<c.rect.right);
+  const ensureGhost=col=>{ if(!ghost){ghost=document.createElement('div');ghost.className='ghost';} if(ghost.parentNode!==col.el) col.el.appendChild(ghost); };
+  const paint=()=>{ ghost.style.top=((target.start-DAY_START)/SLOT*SLOT_PX)+'px'; ghost.style.height=(target.dur/SLOT*SLOT_PX)+'px'; };
+  const move=e2=>{
+    if(!dragging && Math.abs(e2.clientX-sx)+Math.abs(e2.clientY-sy)<5) return;
+    if(!dragging){ dragging=true; el.classList.add('dragging'); document.body.style.userSelect='none'; }
+    if(mode==='mv'){
+      const col=colAt(e2.clientX)||origin; if(!col) return;
+      const y=e2.clientY-col.rect.top-grabOff;
+      let st=DAY_START+Math.round(y/SLOT_PX)*SLOT;
+      st=Math.max(DAY_START,Math.min(st,DAY_END-ent.dur));
+      target={day:col.day,start:st,dur:ent.dur};
+      ensureGhost(col); paint();
+    } else {
+      if(!origin) return;
+      const y=e2.clientY-origin.rect.top;
+      if(mode==='rb'){
+        let end=DAY_START+Math.ceil(y/SLOT_PX)*SLOT;
+        end=Math.max(ent.start+SLOT,Math.min(end,DAY_END));
+        target={day:ent.day,start:ent.start,dur:end-ent.start};
+      } else {
+        let st=DAY_START+Math.floor(y/SLOT_PX)*SLOT;
+        st=Math.min(ent.start+ent.dur-SLOT,Math.max(st,DAY_START));
+        target={day:ent.day,start:st,dur:ent.start+ent.dur-st};
+      }
+      ensureGhost(origin); paint();
+    }
+  };
+  const up=e2=>{
+    document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+    if(ghost) ghost.remove(); el.classList.remove('dragging'); document.body.style.userSelect='';
+    if(!dragging){ openEditor(ent); return; }
+    if(mode==='mv' && (e2.altKey||e2.ctrlKey)){
+      const ne={...ent, id:uid(), day:target.day, start:target.start, exported:false};
+      entries[ne.id]=ne; toast('Blocco duplicato.');
+    } else {
+      ent.day=target.day; ent.start=target.start; ent.dur=target.dur;
+    }
+    saveEntries(); renderAll();
+  };
+  document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+}
 function positionGhost(g,y1,y2){
   const a=Math.min(y1,y2), b=Math.max(y1,y2);
   g.style.top=(Math.floor(a/SLOT_PX)*SLOT_PX)+'px';
@@ -477,9 +557,13 @@ function openEditor(e){
     </div>
     <div class="frow"><label class="permrow" style="display:flex"><input type="checkbox" id="eperm" ${e.permesso?'checked':''}> Permesso / assenza (non finisce nel foglio)</label></div>
     <div id="assignzone">
-      <div class="frow"><label>Progetto</label><div class="pgrid" id="pchips"></div>
+      <div class="frow"><label>Progetto</label>
+        <input type="text" id="pfq" class="fsearch" placeholder="Filtra i tuoi progetti…" autocomplete="off">
+        <div class="pgrid" id="pchips"></div>
         ${actives.length?'':'<div class="hint">Nessun progetto attivo: aprili da “Progetti” in alto.</div>'}</div>
-      <div class="frow"><label>Attività</label><select id="elab"><option value="">— scegli —</option>${cfg.labels.map(l=>`<option ${l===e.label?'selected':''}>${esc(l)}</option>`).join('')}</select>
+      <div class="frow"><label>Attività</label>
+        <input type="text" id="elabq" class="fsearch" style="margin-bottom:0" placeholder="Cerca attività…" autocomplete="off" value="${esc(e.label||'')}">
+        <div class="fulllist" id="elablist" hidden></div>
         <div class="suglabel" id="lsug"></div></div>
     </div>
     <div class="mfoot">
@@ -504,10 +588,13 @@ function openEditor(e){
   };
   const renderChips=()=>{
     $('pchips').className='pgrid';
+    const fq=$('pfq'); if(fq) fq.style.display='';
+    const q=((fq&&fq.value)||'').toLowerCase();
     const sug=edState.sug?.project;
     let html='';
     if(edState.project && !actives.find(p=>p.name===edState.project)) html+=pgItem(edState.project,true,false);
-    html+=actives.map(p=>pgItem(p.name, edState.project===p.name, edState.project!==p.name&&sug===p.name)).join('');
+    html+=actives.filter(p=>!q||p.name.toLowerCase().includes(q)||p.name===edState.project)
+      .map(p=>pgItem(p.name, edState.project===p.name, edState.project!==p.name&&sug===p.name)).join('');
     html+=`<button type="button" class="pgitem pgother" id="pother" title="Scegli tra tutti i progetti, anche non tuoi">altro…</button>`;
     $('pchips').innerHTML=html;
     $('pchips').querySelectorAll('.pgitem[data-p]').forEach(ch=>ch.onclick=()=>{
@@ -517,6 +604,7 @@ function openEditor(e){
     const po=$('pother'); if(po) po.onclick=openFullPicker;
   };
   const openFullPicker=()=>{
+    const fq=$('pfq'); if(fq) fq.style.display='none';
     $('pchips').className='';
     $('pchips').innerHTML=`<input type="text" id="psrch" placeholder="Cerca in tutti i progetti…" autocomplete="off"
       style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:var(--fui)"><div class="fulllist" id="plist"></div>`;
@@ -533,13 +621,28 @@ function openEditor(e){
   const applySug=()=>{
     edState.sug=suggest($('etx').value);
     if(!edState.manualP && edState.sug.project) edState.project=edState.sug.project;
-    if(!edState.manualL && edState.sug.label){ $('elab').value=edState.sug.label; $('lsug').textContent='★ suggerita: '+edState.sug.label; }
-    else if(!edState.manualL) $('lsug').textContent='';
+    if(!edState.manualL){
+      if(edState.sug.label){ edState.label=edState.sug.label; $('elabq').value=edState.label; $('lsug').textContent='★ suggerita: '+edState.label; }
+      else $('lsug').textContent='';
+    }
     renderChips();
   };
   let st=null;
   $('etx').addEventListener('input',()=>{ clearTimeout(st); st=setTimeout(applySug,250); });
-  $('elab').addEventListener('change',()=>{ edState.manualL=true; $('lsug').textContent=''; });
+  $('pfq').addEventListener('input',renderChips);
+  $('pfq').addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); const f=$('pchips').querySelector('.pgitem[data-p]'); if(f) f.click(); } });
+  const renderLabList=()=>{
+    const q=($('elabq').value||'').toLowerCase();
+    const items=cfg.labels.filter(l=>!q||l.toLowerCase().includes(q));
+    $('elablist').innerHTML=items.map(l=>`<button type="button" class="flitem" data-l="${esc(l)}">${edState.sug&&edState.sug.label===l?'★ ':''}${esc(l)}</button>`).join('')
+      ||'<div class="hint" style="padding:8px">Nessuna attività trovata.</div>';
+    $('elablist').querySelectorAll('.flitem').forEach(b=>b.addEventListener('mousedown',ev=>{ ev.preventDefault(); pickLabel(b.dataset.l); }));
+  };
+  const pickLabel=l=>{ edState.label=l; edState.manualL=true; $('elabq').value=l; $('elablist').hidden=true; $('lsug').textContent=''; };
+  $('elabq').addEventListener('focus',()=>{ $('elabq').select(); $('elablist').hidden=false; renderLabList(); });
+  $('elabq').addEventListener('input',()=>{ $('elablist').hidden=false; renderLabList(); });
+  $('elabq').addEventListener('blur',()=>{ setTimeout(()=>{ const el=$('elablist'); if(el) el.hidden=true; const eq=$('elabq'); if(eq) eq.value=edState?(edState.label||''):''; },130); });
+  $('elabq').addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); const f=$('elablist').querySelector('.flitem[data-l]'); if(f) pickLabel(f.dataset.l); } });
   $('eperm').addEventListener('change',()=>{ $('assignzone').style.display=$('eperm').checked?'none':''; });
   if(e.permesso) $('assignzone').style.display='none';
   $('dm').onclick=()=>{ edState.dur=Math.max(SLOT,edState.dur-SLOT); $('dv').textContent=fmtOre(edState.dur)+' h'; };
@@ -556,7 +659,7 @@ function openEditor(e){
       id:e.id||uid(), day:$('eday').value, start:+$('estart').value, dur:edState.dur,
       text:$('etx').value.trim(), permesso:$('eperm').checked,
       project: $('eperm').checked?null:edState.project,
-      label: $('eperm').checked?null:($('elab').value||null),
+      label: $('eperm').checked?null:(edState.label||null),
       exported: e.exported||false
     };
     if(ent.start+ent.dur>DAY_END) ent.dur=DAY_END-ent.start;
@@ -658,12 +761,8 @@ document.getElementById('filein').addEventListener('change',ev=>{
         const bl=XLSX.utils.sheet_to_json(wb.Sheets['Blocchi'],{header:1,raw:true});
         const cf=XLSX.utils.sheet_to_json(wb.Sheets['Config'],{header:1,raw:true});
         const {E,C,D}=applyBackup(bl,cf);
-        entries=E; if(C.projects.length) cfg.projects=C.projects; if(C.labels.length) cfg.labels=C.labels;
-        if(C.sheets.length) cfg.sheets=C.sheets; if(C.user) cfg.user=C.user; dict=D;
-        sSet('ore-entries',entries); sSet('ore-cfg',cfg); sSet('ore-dict',dict);
-        ensureHues(false); buildKw(); dirty=false; updateDirty();
-        toast('Salvataggio ripristinato: '+Object.keys(E).length+' blocchi, '+cfg.projects.length+' progetti.');
-        document.getElementById('modalroot').innerHTML=''; renderAll();
+        if(Object.keys(entries).length===0) doRestore(E,C,D);
+        else openRestoreConfirm(E,C,D);
         ev.target.value=''; return;
       }
       const pn=wb.SheetNames.find(n=>n.toLowerCase().includes('progett'));
@@ -837,6 +936,30 @@ function applyBackup(bl,cf){
   }
   return {E,C,D};
 }
+function doRestore(E,C,D){
+  entries=E; if(C.projects.length) cfg.projects=C.projects; if(C.labels.length) cfg.labels=C.labels;
+  if(C.sheets.length) cfg.sheets=C.sheets; if(C.user) cfg.user=C.user; dict=D;
+  ensureHues(false);
+  sSet('ore-entries',entries); sSet('ore-cfg',cfg); sSet('ore-dict',dict);
+  buildKw(); dirty=false; updateDirty();
+  document.getElementById('modalroot').innerHTML='';
+  renderAll();
+  toast('Salvataggio ripristinato: '+Object.keys(E).length+' blocchi, '+cfg.projects.length+' progetti.');
+}
+function openRestoreConfirm(E,C,D){
+  const root=document.getElementById('modalroot');
+  const cur=Object.keys(entries).length, nw=Object.keys(E).length;
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:470px">
+    <div class="mhead"><h2>Ripristinare il salvataggio?</h2><button class="x" id="mx">×</button></div>
+    <div style="font-size:13.5px;margin-bottom:10px">Il file contiene <b>${nw}</b> blocchi: sostituiranno i <b>${cur}</b> attuali, insieme a progetti, colori, utente e dizionario.</div>
+    <div class="warn">Se nei blocchi attuali c'è lavoro non ancora salvato, annulla e fai prima “Salva .xlsx”.</div>
+    <div class="mfoot"><button class="btn" id="rno">Annulla</button><div class="grow"></div><button class="btn primary" id="ryes">Ripristina</button></div>
+  </div></div>`;
+  const close=()=>{root.innerHTML='';};
+  root.querySelector('#mx').onclick=root.querySelector('#rno').onclick=close;
+  root.querySelector('#ov').addEventListener('click',e=>{ if(e.target.id==='ov') close(); });
+  root.querySelector('#ryes').onclick=()=>doRestore(E,C,D);
+}
 function saveXlsx(){
   if(typeof XLSX==='undefined'){ toast('Libreria Excel non caricata: controlla la connessione.'); return; }
   const {bl,cf}=backupRows();
@@ -869,6 +992,22 @@ document.getElementById('wklabel').onclick=()=>{ const j=document.getElementById
 document.getElementById('jumpdate').onchange=e=>{ if(e.target.value){ weekStart=monday(fromKey(e.target.value)); renderAll(); } };
 document.getElementById('pfilter').onchange=e=>{ filterP=e.target.value; renderAll(); };
 document.getElementById('bperm').onclick=openPermessi;
+document.addEventListener('keydown',ev=>{
+  if(document.getElementById('modalroot').childElementCount) return; /* editor o pannelli aperti: non interferire */
+  const k=(ev.key||'').toLowerCase();
+  if((ev.metaKey||ev.ctrlKey) && k==='c' && hoverEntryId && entries[hoverEntryId]){
+    clipBlock={...entries[hoverEntryId]};
+    toast('Blocco copiato: punta il giorno e l\'ora che vuoi e premi Ctrl/Cmd+V.');
+    ev.preventDefault();
+  } else if((ev.metaKey||ev.ctrlKey) && k==='v' && clipBlock){
+    const t=hoverSlot || {day:clipBlock.day, start:Math.min(clipBlock.start+clipBlock.dur, DAY_END-clipBlock.dur)};
+    const st=Math.max(DAY_START, Math.min(t.start, DAY_END-clipBlock.dur));
+    const ne={...clipBlock, id:uid(), day:t.day, start:st, exported:false};
+    entries[ne.id]=ne; saveEntries(); renderAll();
+    toast('Incollato: '+(ne.text||ne.label||'blocco'));
+    ev.preventDefault();
+  }
+});
 document.getElementById('bproj').onclick=openProjects;
 document.getElementById('bexp').onclick=openExport;
 document.getElementById('bics').onclick=exportICS;
@@ -886,6 +1025,15 @@ document.getElementById('rawcount').onclick=()=>{
   ensureHues(true); buildKw(); renderAll();
   dirty=false; updateDirty();
   try{ window.scrollTo(0, 7*60/SLOT*SLOT_PX - 20); }catch(err){}
+  setInterval(()=>{
+    const n=new Date(), tk=dayKey(n);
+    const nl=document.querySelector('.nowline');
+    if(nl){ nl.style.top=(((n.getHours()*60+n.getMinutes())-DAY_START)/SLOT*SLOT_PX).toFixed(1)+'px'; }
+    else{
+      const col=document.querySelector('.dbody[data-day="'+tk+'"]');
+      if(col && !document.getElementById('modalroot').childElementCount) renderAll();
+    }
+  },60000);
 })();
 </script>
 </body>
