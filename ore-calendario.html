@@ -184,7 +184,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v12</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v13</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -944,13 +944,13 @@ function fallbackCopy(t,done){
 function buildICS(list){
   const escI=s=>String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
   const dt=(k,m)=>{ if(m>=1440){ const n=dayKey(addDays(fromKey(k),1)); return n.replace(/-/g,'')+'T000000'; } return k.replace(/-/g,'')+'T'+pad(Math.floor(m/60))+pad(m%60)+'00'; };
+  const now=new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';
   let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OreApp//IT\r\nX-WR-CALNAME:Ore '+(cfg.user||'')+'\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n';
   for(const e of list){
     const sum = e.permesso ? ('Permesso'+(e.text?' — '+e.text:''))
       : ((e.project?'['+e.project.split(' - ')[0]+'] ':'')+(e.text||e.label||'Lavoro'));
-    const stamp=e.created||(dt(e.day,e.start)+'Z');
     const seq=e.seq||0;
-    ics+='BEGIN:VEVENT\r\nUID:'+e.id+'@ore-app\r\nDTSTAMP:'+stamp+'\r\nSEQUENCE:'+seq+'\r\nDTSTART:'+dt(e.day,e.start)+'\r\nDTEND:'+dt(e.day,e.start+e.dur)+'\r\n'
+    ics+='BEGIN:VEVENT\r\nUID:'+e.id+'@ore-app\r\nDTSTAMP:'+now+'\r\nLAST-MODIFIED:'+now+'\r\nSEQUENCE:'+seq+'\r\nDTSTART:'+dt(e.day,e.start)+'\r\nDTEND:'+dt(e.day,e.start+e.dur)+'\r\n'
       +'SUMMARY:'+escI(sum)+'\r\n'+(e.label?'DESCRIPTION:'+escI(e.label)+'\r\n':'')+'END:VEVENT\r\n';
   }
   return ics+'END:VCALENDAR\r\n';
