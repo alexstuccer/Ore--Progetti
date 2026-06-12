@@ -148,6 +148,11 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .btn.danger{color:var(--danger);border-color:#E5CFC8}
 .btn.danger:hover{background:#FBF1EE}
 .hint{font-size:12px;color:var(--muted);margin-top:6px}
+.wiznav{display:flex;align-items:center;gap:8px}
+.wbtn{border:1px solid var(--line);background:#fff;border-radius:7px;width:28px;height:28px;font-size:14px;cursor:pointer;color:var(--ink)}
+.wbtn:hover:not(:disabled){background:var(--accent-soft)}
+.wbtn:disabled{opacity:.35;cursor:default}
+.wcount{font-family:var(--fmono);font-size:12px;color:var(--muted)}
 .suglabel{font-size:11px;color:var(--accent-ink);margin-top:4px}
 
 /* project manager */
@@ -167,6 +172,8 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .exptable td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top}
 .exptable td.mono{font-family:var(--fmono);white-space:nowrap}
 .warn{background:#FBF4E3;border:1px solid #E8D8A8;border-radius:8px;padding:9px 11px;font-size:12.5px;margin-bottom:10px}
+.rawlist{margin-top:8px;border:1px solid #E8D8A8;border-radius:8px;overflow:hidden;background:#fff;max-height:170px;overflow-y:auto}
+.rawlist .flitem b{font-family:var(--fmono);font-weight:700;font-size:11.5px}
 
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw}
 .banner{background:#FBF4E3;border-bottom:1px solid #E8D8A8;padding:7px 14px;font-size:12.5px}
@@ -523,10 +530,11 @@ function startBlockDrag(ev, ent, el, mode){
     if(ghost) ghost.remove(); el.classList.remove('dragging'); document.body.style.userSelect='';
     if(!dragging){ openEditor(ent); return; }
     if(mode==='mv' && (e2.altKey||e2.ctrlKey)){
-      const ne={...ent, id:uid(), day:target.day, start:target.start, exported:false};
+      const ne={...ent, id:uid(), day:target.day, start:target.start, exported:false, seq:0, created:new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z'};
       entries[ne.id]=ne; toast('Blocco duplicato.');
     } else {
       ent.day=target.day; ent.start=target.start; ent.dur=target.dur;
+      ent.seq=(ent.seq||0)+1;
     }
     saveEntries(); renderAll();
   };
@@ -540,15 +548,16 @@ function positionGhost(g,y1,y2){
 
 /* ================= editor blocco ================= */
 let edState=null;
-function openEditor(e){
+function openEditor(e, onDone, nav){
   edState={...e, manualP:!!e.project, manualL:!!e.label};
+  let savedFlag=false;
   const isNew=!e.id;
   const actives=cfg.projects.filter(p=>p.state==='active');
   const root=document.getElementById('modalroot');
   const timeOpts = m => { let o=''; for(let t=DAY_START;t<DAY_END;t+=SLOT) o+=`<option value="${t}" ${t===m?'selected':''}>${fmtTime(t)}</option>`; return o; };
 
   root.innerHTML=`<div class="overlay" id="ov"><div class="modal" role="dialog" aria-label="Blocco">
-    <div class="mhead"><h2>${isNew?'Nuovo blocco':'Modifica blocco'}</h2><button class="x" id="mx">×</button></div>
+    <div class="mhead"><h2>${nav?'Da assegnare':(isNew?'Nuovo blocco':'Modifica blocco')}</h2>${nav?`<div class="wiznav"><button type="button" class="wbtn" id="wprevb" ${nav.index<=1?'disabled':''}>‹</button><span class="wcount">${nav.index} / ${nav.total}</span><button type="button" class="wbtn" id="wnextb" ${nav.index>=nav.total?'disabled':''}>›</button></div>`:''}<button class="x" id="mx">×</button></div>
     <div class="frow"><label>Descrizione (due parole bastano)</label>
       <input type="text" id="etx" value="${esc(e.text)}" placeholder="es. chiusura soresa, telefonata rieti…" autocomplete="off"></div>
     <div class="inline">
@@ -572,12 +581,16 @@ function openEditor(e){
       ${isNew?'':'<button class="btn danger" id="edel">Elimina</button>'}
       <div class="grow"></div>
       <button class="btn" id="ecanc">Annulla</button>
-      <button class="btn primary" id="esave">Salva</button>
+      <button class="btn primary" id="esave">${nav?'Salva e avanti':'Salva'}</button>
     </div>
   </div></div>`;
 
   const $=id=>document.getElementById(id);
-  const close=()=>{ root.innerHTML=''; edState=null; };
+  const close=()=>{ root.innerHTML=''; edState=null; if(onDone) onDone(savedFlag); };
+  if(nav){
+    $('wprevb').onclick=()=>{ root.innerHTML=''; edState=null; nav.onPrev(); };
+    $('wnextb').onclick=()=>{ root.innerHTML=''; edState=null; nav.onNext(); };
+  }
   $('mx').onclick=$('ecanc').onclick=close;
   $('ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') close(); });
   document.addEventListener('keydown',function esck(ev){ if(ev.key==='Escape'){close();document.removeEventListener('keydown',esck);} });
@@ -657,18 +670,44 @@ function openEditor(e){
     else{ $('edel').dataset.c='1'; $('edel').textContent='Sicuro? Elimina'; }
   };
   $('esave').onclick=()=>{
+    savedFlag=true;
+    const now=new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';
     const ent={
       id:e.id||uid(), day:$('eday').value, start:+$('estart').value, dur:edState.dur,
       text:$('etx').value.trim(), permesso:$('eperm').checked,
       project: $('eperm').checked?null:edState.project,
       label: $('eperm').checked?null:(edState.label||null),
-      exported: e.exported||false
+      exported: e.exported||false,
+      created: e.created||now,
+      seq: e.id ? ((e.seq||0)+1) : 0
     };
     if(ent.start+ent.dur>DAY_END) ent.dur=DAY_END-ent.start;
     entries[ent.id]=ent; saveEntries();
     if(ent.project&&ent.label) learn(ent);
     close(); renderAll();
   };
+}
+
+/* ================= wizard assegnazione ================= */
+function openWizard(onFinish){
+  const queue=()=>Object.values(entries).filter(x=>!x.permesso&&!(x.project&&x.label))
+    .sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:a.start-b.start).map(x=>x.id);
+  let pos=0;
+  const exit=done=>{ renderAll(); if(done) toast('Tutto assegnato ✓'); if(onFinish) onFinish(); };
+  const show=()=>{
+    const ids=queue();
+    if(!ids.length){ document.getElementById('modalroot').innerHTML=''; exit(true); return; }
+    if(pos>=ids.length) pos=ids.length-1;
+    if(pos<0) pos=0;
+    const ent=entries[ids[pos]];
+    weekStart=monday(fromKey(ent.day)); renderAll();
+    openEditor(ent, saved=>{ if(saved) show(); else exit(false); }, {
+      index:pos+1, total:ids.length,
+      onPrev:()=>{ pos--; show(); },
+      onNext:()=>{ pos++; show(); }
+    });
+  };
+  show();
 }
 
 /* ================= gestione progetti ================= */
@@ -816,20 +855,28 @@ function buildRows(includeExported, from, to){
   }
   return Object.values(g).sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:0);
 }
-function openExport(){
+function openExport(initFrom, initTo, initIncl){
   const root=document.getElementById('modalroot');
-  let inclExp=false, dFrom='', dTo='';
+  let inclExp=!!initIncl, dFrom=initFrom||'', dTo=initTo||'';
   const draw=()=>{
     const rows=buildRows(inclExp, dFrom, dTo);
-    const rawN=Object.values(entries).filter(e=>!e.permesso&&!(e.project&&e.label)
-      &&(!dFrom||e.day>=dFrom)&&(!dTo||e.day<=dTo)).length;
+    const rawList=Object.values(entries).filter(e=>!e.permesso&&!(e.project&&e.label)
+      &&(!dFrom||e.day>=dFrom)&&(!dTo||e.day<=dTo))
+      .sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:a.start-b.start);
     const tsv=rows.map(r=>[euDate(r.day),r.project,fmtOre(r.min),r.label,r.notes.join('; ')].join('\t')).join('\n');
     root.querySelector('#expbody').innerHTML=
-      (rawN?`<div class="warn">⚠ Hai <b>${rawN}</b> blocchi grigi non assegnati${(dFrom||dTo)?' in questo periodo':''}: non sono inclusi. Assegnali e riapri.</div>`:'')+
+      (rawList.length?`<div class="warn">⚠ <b>${rawList.length}</b> blocchi non assegnati${(dFrom||dTo)?' in questo periodo':' (in tutto il calendario)'} — non sono inclusi. Clicca per sistemarli:
+        <div class="rawlist">${rawList.map(e=>`<button type="button" class="flitem" data-rid="${e.id}"><b>${DOW[(fromKey(e.day).getDay()+6)%7]} ${euDate(e.day).slice(0,5)}</b> · ${fmtTime(e.start)}–${fmtTime(e.start+e.dur)} · ${esc(e.text||'(senza testo)')}</button>`).join('')}</div>
+        <button type="button" class="btn" id="wizgo" style="margin-top:8px">Sistemale in sequenza ›</button></div>`:'')+
       (rows.length?`<table class="exptable"><tr><th>Data</th><th>Progetto</th><th>Ore</th><th>Attività</th><th>Note</th></tr>`+
         rows.map(r=>`<tr><td class="mono">${euDate(r.day)}</td><td>${esc(r.project.split(' - ')[0])}</td><td class="mono">${fmtOre(r.min)}</td><td>${esc(r.label)}</td><td>${esc(r.notes.join('; '))}</td></tr>`).join('')+`</table>`
         :`<div class="hint" style="margin:14px 0">${(dFrom||dTo)?'Niente da esportare in questo intervallo: o è già copiato, o è ancora da assegnare.':'Niente da esportare: tutto già copiato nel foglio.'}</div>`)+
       `<label class="hint" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="iexp" ${inclExp?'checked':''}> includi anche le righe già esportate</label>`;
+    root.querySelectorAll('[data-rid]').forEach(b=>b.onclick=()=>{
+      openEditor(entries[b.dataset.rid], ()=>openExport(dFrom,dTo,inclExp));
+    });
+    const wg=root.querySelector('#wizgo');
+    if(wg) wg.onclick=()=>openWizard(()=>openExport(dFrom,dTo,inclExp));
     root.querySelector('#iexp').onchange=e=>{inclExp=e.target.checked;draw();};
     root.querySelector('#ecopy').disabled = root.querySelector('#ecopydone').disabled = root.querySelector('#erowx').disabled = !rows.length;
     const fg=cfg.user?('foglio '+cfg.user):'tuo foglio';
@@ -844,8 +891,8 @@ function openExport(){
   root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:680px">
     <div class="mhead"><h2>Righe per il foglio</h2><button class="x" id="mx">×</button></div>
     <div class="inline" style="align-items:flex-end">
-      <div class="frow" style="margin-bottom:8px"><label>Dal</label><input type="date" id="efrom"></div>
-      <div class="frow" style="margin-bottom:8px"><label>Al</label><input type="date" id="eto"></div>
+      <div class="frow" style="margin-bottom:8px"><label>Dal</label><input type="date" id="efrom" value="${dFrom}"></div>
+      <div class="frow" style="margin-bottom:8px"><label>Al</label><input type="date" id="eto" value="${dTo}"></div>
     </div>
     <div class="chips" style="margin-bottom:12px">
       <button type="button" class="chip" id="qweek">settimana visibile</button>
@@ -895,27 +942,59 @@ function fallbackCopy(t,done){
 function buildICS(list){
   const escI=s=>String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\n/g,'\\n');
   const dt=(k,m)=>{ if(m>=1440){ const n=dayKey(addDays(fromKey(k),1)); return n.replace(/-/g,'')+'T000000'; } return k.replace(/-/g,'')+'T'+pad(Math.floor(m/60))+pad(m%60)+'00'; };
-  const stamp=new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z';
-  let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OreApp//IT\r\nX-WR-CALNAME:Ore '+(cfg.user||'')+'\r\nCALSCALE:GREGORIAN\r\n';
+  let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OreApp//IT\r\nX-WR-CALNAME:Ore '+(cfg.user||'')+'\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n';
   for(const e of list){
     const sum = e.permesso ? ('Permesso'+(e.text?' — '+e.text:''))
       : ((e.project?'['+e.project.split(' - ')[0]+'] ':'')+(e.text||e.label||'Lavoro'));
-    ics+='BEGIN:VEVENT\r\nUID:'+e.id+'@ore-app\r\nDTSTAMP:'+stamp+'\r\nDTSTART:'+dt(e.day,e.start)+'\r\nDTEND:'+dt(e.day,e.start+e.dur)+'\r\n'
+    const stamp=e.created||(dt(e.day,e.start)+'Z');
+    const seq=e.seq||0;
+    ics+='BEGIN:VEVENT\r\nUID:'+e.id+'@ore-app\r\nDTSTAMP:'+stamp+'\r\nSEQUENCE:'+seq+'\r\nDTSTART:'+dt(e.day,e.start)+'\r\nDTEND:'+dt(e.day,e.start+e.dur)+'\r\n'
       +'SUMMARY:'+escI(sum)+'\r\n'+(e.label?'DESCRIPTION:'+escI(e.label)+'\r\n':'')+'END:VEVENT\r\n';
   }
   return ics+'END:VCALENDAR\r\n';
 }
-function downloadICS(silent){
-  const list=Object.values(entries).sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:a.start-b.start);
-  if(!list.length){ if(!silent) toast('Nessun blocco da mettere nel calendario.'); return false; }
+function downloadICS(silent, from, to){
+  const list=Object.values(entries).filter(e=>(!from||e.day>=from)&&(!to||e.day<=to))
+    .sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:a.start-b.start);
+  if(!list.length){ if(!silent) toast('Nessun blocco nel periodo scelto.'); return false; }
   const blob=new Blob([buildICS(list)],{type:'text/calendar'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='ore-'+((cfg.user||'app').toLowerCase().replace(/[^a-z0-9]+/g,'')||'app')+'.ics';
   a.click(); URL.revokeObjectURL(a.href);
   return true;
 }
-function exportICS(){
-  if(downloadICS(false)) toast('Scaricato il calendario: in Outlook si aprirà come "Ore '+(cfg.user||'')+'".');
+function openIcsDialog(){
+  const root=document.getElementById('modalroot');
+  let dFrom=dayKey(weekStart), dTo=dayKey(addDays(weekStart,6));
+  const count=()=>Object.values(entries).filter(e=>(!dFrom||e.day>=dFrom)&&(!dTo||e.day<=dTo)).length;
+  const draw=()=>{ root.querySelector('#icsinfo').innerHTML='Blocchi nel periodo: <b>'+count()+'</b> (lavoro e permessi).';
+    root.querySelector('#icsgo').disabled=!count(); };
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:480px">
+    <div class="mhead"><h2>Calendario per Outlook</h2><button class="x" id="mx">×</button></div>
+    <div class="inline" style="align-items:flex-end">
+      <div class="frow"><label>Dal</label><input type="date" id="ifrom" value="${dFrom}"></div>
+      <div class="frow"><label>Al</label><input type="date" id="ito" value="${dTo}"></div>
+    </div>
+    <div class="chips" style="margin-bottom:10px">
+      <button type="button" class="chip" id="iqw">settimana visibile</button>
+      <button type="button" class="chip" id="iqm">mese visibile</button>
+      <button type="button" class="chip" id="iqa">tutto</button>
+    </div>
+    <div class="hint" id="icsinfo" style="margin-bottom:10px"></div>
+    <div class="warn">In Outlook usa <b>“Apri come nuovo calendario”</b>, non “Importa”: gli eventi compaiono in un calendario separato “Ore ${esc(cfg.user||'')}” affiancato al tuo. Per aggiornarlo, elimina il calendario “Ore” vecchio e riapri il file. “Importa” invece copia gli eventi <i>dentro</i> il tuo calendario, e a ogni giro li raddoppia.</div>
+    <div class="mfoot"><div class="grow"></div><button class="btn primary" id="icsgo">Scarica .ics</button></div>
+  </div></div>`;
+  const set=(a,b)=>{ dFrom=a; dTo=b; root.querySelector('#ifrom').value=a; root.querySelector('#ito').value=b; draw(); };
+  root.querySelector('#ifrom').onchange=e=>{ dFrom=e.target.value; draw(); };
+  root.querySelector('#ito').onchange=e=>{ dTo=e.target.value; draw(); };
+  root.querySelector('#iqw').onclick=()=>set(dayKey(weekStart), dayKey(addDays(weekStart,6)));
+  root.querySelector('#iqm').onclick=()=>{ const y=weekStart.getFullYear(), m=weekStart.getMonth();
+    set(dayKey(new Date(y,m,1)), dayKey(new Date(y,m+1,0))); };
+  root.querySelector('#iqa').onclick=()=>set('','');
+  root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
+  root.querySelector('#ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') root.innerHTML=''; });
+  root.querySelector('#icsgo').onclick=()=>{ if(downloadICS(false,dFrom,dTo)){ root.innerHTML=''; toast('Scaricato: in Outlook → “Apri come nuovo calendario”.'); } };
+  draw();
 }
 
 /* ================= salvataggio .xlsx ================= */
@@ -929,9 +1008,9 @@ function excelMin(v){ /* 'HH:MM' oppure frazione di giorno di Excel */
   const m=String(v).match(/(\d{1,2})[:.](\d{2})/); return m? (+m[1])*60+(+m[2]) : 0;
 }
 function backupRows(){
-  const bl=[['ID','Giorno','Inizio','Durata_min','Testo','Progetto','Attivita','Permesso','Esportata']];
+  const bl=[['ID','Giorno','Inizio','Durata_min','Testo','Progetto','Attivita','Permesso','Esportata','Created','Seq']];
   for(const e of Object.values(entries).sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:a.start-b.start))
-    bl.push([e.id,e.day,fmtTime(e.start),e.dur,e.text||'',e.project||'',e.label||'',e.permesso?1:0,e.exported?1:0]);
+    bl.push([e.id,e.day,fmtTime(e.start),e.dur,e.text||'',e.project||'',e.label||'',e.permesso?1:0,e.exported?1:0,e.created||'',e.seq||0]);
   const cf=[['tipo','a','b','c','d']];
   cf.push(['utente',cfg.user||'','','','']);
   for(const s of (cfg.sheets||[])) cf.push(['foglio',s,'','','']);
@@ -946,7 +1025,8 @@ function applyBackup(bl,cf){
     const id=r[0]?String(r[0]):uid();
     E[id]={ id, day:excelDay(r[1]), start:excelMin(r[2]), dur:Math.max(SLOT,Math.round((+r[3]||60)/SLOT)*SLOT),
       text:r[4]?String(r[4]):'', project:r[5]?String(r[5]):null, label:r[6]?String(r[6]):null,
-      permesso:!!+(r[7]||0), exported:!!+(r[8]||0) };
+      permesso:!!+(r[7]||0), exported:!!+(r[8]||0),
+      created:r[9]?String(r[9]):null, seq:r[10]?+r[10]:0 };
   }
   const C={projects:[],labels:[],sheets:[],user:null}, D={};
   for(let i=1;i<cf.length;i++){ const r=cf[i]; if(!r||!r[0]) continue;
@@ -1024,21 +1104,18 @@ document.addEventListener('keydown',ev=>{
   } else if((ev.metaKey||ev.ctrlKey) && k==='v' && clipBlock){
     const t=hoverSlot || {day:clipBlock.day, start:Math.min(clipBlock.start+clipBlock.dur, DAY_END-clipBlock.dur)};
     const st=Math.max(DAY_START, Math.min(t.start, DAY_END-clipBlock.dur));
-    const ne={...clipBlock, id:uid(), day:t.day, start:st, exported:false};
+    const ne={...clipBlock, id:uid(), day:t.day, start:st, exported:false, seq:0, created:new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z'};
     entries[ne.id]=ne; saveEntries(); renderAll();
     toast('Incollato: '+(ne.text||ne.label||'blocco'));
     ev.preventDefault();
   }
 });
 document.getElementById('bproj').onclick=openProjects;
-document.getElementById('bexp').onclick=openExport;
-document.getElementById('bics').onclick=exportICS;
+document.getElementById('bexp').onclick=()=>openExport();
+document.getElementById('bics').onclick=openIcsDialog;
 document.getElementById('bsave').onclick=saveXlsx;
 window.addEventListener('beforeunload',e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
-document.getElementById('rawcount').onclick=()=>{
-  const raw=Object.values(entries).filter(e=>!e.permesso&&!(e.project&&e.label)).sort((a,b)=>a.day<b.day?-1:1);
-  if(raw.length){ weekStart=monday(fromKey(raw[0].day)); renderAll(); openEditor(raw[0]); }
-};
+document.getElementById('rawcount').onclick=()=>openWizard();
 
 (async function init(){
   const c=await sGet('ore-cfg'); if(c) cfg=c;
