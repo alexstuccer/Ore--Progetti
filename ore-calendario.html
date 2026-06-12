@@ -185,7 +185,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v15</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v16</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -245,6 +245,11 @@ const fmtTime = m => pad(Math.floor(m/60))+':'+pad(m%60);
 const fmtOre = min => { let v=min/60; let s=(Math.round(v*100)/100).toString().replace('.',','); return s; };
 const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const uid = () => 'e'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function ovGuard(el, fn){
+  let down=false;
+  el.addEventListener('mousedown',ev=>{ down=(ev.target===el); });
+  el.addEventListener('click',ev=>{ const ok=down&&ev.target===el; down=false; if(ok) fn(); });
+}
 
 /* colore per progetto: tavolozza di tinte distinte, assegnate una volta e salvate */
 const HUES=[210,150,25,280,0,190,45,330,100,250,170,15,300,70];
@@ -612,7 +617,7 @@ function openEditor(e, onDone, nav){
     $('wnextb').onclick=()=>{ root.innerHTML=''; edState=null; nav.onNext(); };
   }
   $('mx').onclick=$('ecanc').onclick=close;
-  $('ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') close(); });
+  ovGuard($('ov'), close);
   document.addEventListener('keydown',function esck(ev){ if(ev.key==='Escape'){close();document.removeEventListener('keydown',esck);} });
 
   const pgItem=(name,sel,isSug,isProp)=>{
@@ -768,7 +773,7 @@ function openProjects(){
   </div></div>`;
   root.querySelector('#mx').onclick=()=>{root.innerHTML='';renderAll();};
   root.querySelector('#puser').onclick=()=>{ openUserPicker(); };
-  root.querySelector('#ov').addEventListener('click',ev=>{ if(ev.target.id==='ov'){root.innerHTML='';renderAll();} });
+  ovGuard(root.querySelector('#ov'), ()=>{root.innerHTML='';renderAll();});
   root.querySelector('#psearch').addEventListener('input',draw);
   draw();
 }
@@ -812,7 +817,7 @@ function openPermessi(){
     <div class="mfoot"><button class="btn" id="pcopy" ${list.length?'':'disabled'}>Copia per il cartellino</button></div>
   </div></div>`;
   root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
-  root.querySelector('#ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') root.innerHTML=''; });
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
   if(list.length) root.querySelector('#pcopy').onclick=()=>copyText(tsvRows.join('\n'),'Permessi copiati: Data · Dalle · Alle · Ore · Nota.');
 }
 
@@ -940,7 +945,7 @@ function openExport(initFrom, initTo, initIncl){
     setRange(dayKey(new Date(y,m,1)), dayKey(new Date(y,m+1,0))); };
   root.querySelector('#qall').onclick=()=>setRange('','');
   root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
-  root.querySelector('#ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') root.innerHTML=''; });
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
   draw();
 }
 function rowsXlsx(rows){
@@ -1018,7 +1023,7 @@ function openIcsDialog(){
     set(dayKey(new Date(y,m,1)), dayKey(new Date(y,m+1,0))); };
   root.querySelector('#iqa').onclick=()=>set('','');
   root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
-  root.querySelector('#ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') root.innerHTML=''; });
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
   root.querySelector('#icsgo').onclick=()=>{ if(downloadICS(false,dFrom,dTo)){ root.innerHTML=''; toast('Scaricato: in Outlook → “Apri come nuovo calendario”.'); } };
   draw();
 }
@@ -1085,7 +1090,7 @@ function openRestoreConfirm(E,C,D){
   </div></div>`;
   const close=()=>{root.innerHTML='';};
   root.querySelector('#mx').onclick=root.querySelector('#rno').onclick=close;
-  root.querySelector('#ov').addEventListener('click',e=>{ if(e.target.id==='ov') close(); });
+  ovGuard(root.querySelector('#ov'), close);
   root.querySelector('#ryes').onclick=()=>doRestore(E,C,D);
 }
 function saveXlsx(){
