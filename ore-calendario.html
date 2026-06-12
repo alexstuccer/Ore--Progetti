@@ -185,7 +185,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v14</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v15</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -347,7 +347,7 @@ function learn(e){
 
 /* ================= render ================= */
 function weekDays(){ return [...Array(7)].map((_,i)=>addDays(weekStart,i)); }
-function entriesOfDay(k){ return Object.values(entries).filter(e=>e.day===k).sort((a,b)=>a.start-b.start); }
+function entriesOfDay(k){ return Object.values(entries).filter(e=>e.day===k).sort((a,b)=>a.start-b.start || b.dur-a.dur); }
 
 function renderAll(){
   const days=weekDays(), todayK=dayKey(new Date());
@@ -364,15 +364,28 @@ function renderAll(){
 
   let html=gut, wkAssigned=0, wkRaw=0;
   for(const d of days){
-    const k=dayKey(d), list=entriesOfDay(k);
+    const k=dayKey(d), list=entriesOfDay(k).filter(passFilter);
     let assigned=0, raw=0;
     let blocks='';
-    const laid=[];
+    const lay={};
+    { /* blocchi sovrapposti: la giornata si divide in colonne (2, 3, ...) */
+      let cluster=[], colsEnd=[], clusterEnd=-1;
+      const flush=()=>{ const n=Math.max(colsEnd.length,1); for(const it of cluster) lay[it.id].cols=n; cluster=[]; colsEnd=[]; clusterEnd=-1; };
+      for(const e of list){
+        if(cluster.length && e.start>=clusterEnd) flush();
+        let col=-1;
+        for(let i=0;i<colsEnd.length;i++){ if(colsEnd[i]<=e.start){ col=i; break; } }
+        if(col===-1){ col=colsEnd.length; colsEnd.push(0); }
+        colsEnd[col]=e.start+e.dur;
+        lay[e.id]={col:col, cols:1};
+        cluster.push(e);
+        clusterEnd=Math.max(clusterEnd, e.start+e.dur);
+      }
+      flush();
+    }
     for(const e of list){
-      if(!passFilter(e)) continue;
-      let depth=0; for(const L of laid) if(L.end>e.start && L.start<e.start+e.dur) depth++;
-      laid.push({start:e.start, end:e.start+e.dur});
-      const off=`left:${3+depth*12}px;z-index:${1+depth};`;
+      const Lc=lay[e.id];
+      const off=`left:calc(${(Lc.col/Lc.cols*100).toFixed(2)}% + 2px);width:calc(${(100/Lc.cols).toFixed(2)}% - 4px);right:auto;z-index:${1+Lc.col};`;
       const top=(e.start-DAY_START)/SLOT*SLOT_PX, h=Math.max(e.dur/SLOT*SLOT_PX-2,12);
       const time=fmtTime(e.start)+'–'+fmtTime(e.start+e.dur);
       if(e.permesso){
