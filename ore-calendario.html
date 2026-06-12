@@ -22,7 +22,7 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{background:var(--bg);color:var(--ink);font-family:var(--fui);font-size:14px;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--ink);font-family:var(--fui);font-size:14px;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;overflow:hidden}
 button{font-family:var(--fui);cursor:pointer}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
@@ -53,10 +53,10 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .rawbtn b{font-weight:700}
 
 /* ---------- calendar ---------- */
-.calwrap{overflow-x:auto;padding:10px 8px 70px}
-.cal{display:grid;grid-template-columns:46px repeat(7,minmax(118px,1fr));min-width:880px;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
-.gutter{border-right:1px solid var(--line)}
-.dhead{height:46px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;padding:0 8px;gap:1px}
+.calwrap{flex:1;min-height:0;overflow:auto;padding:10px 8px 40px}
+.cal{display:grid;grid-template-columns:46px repeat(7,minmax(118px,1fr));min-width:880px;gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.gutter{border-right:1px solid var(--line);position:sticky;left:0;z-index:5;background:var(--surface)}
+.dhead{height:46px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;padding:0 8px;gap:1px;position:sticky;top:0;z-index:6;background:var(--surface)}
 .dhead .dn{font-size:12px;color:var(--muted);text-transform:capitalize}
 .dhead .dn b{color:var(--ink);font-size:13px}
 .dhead .dtot{font-family:var(--fmono);font-size:11px;color:var(--accent-ink)}
@@ -75,7 +75,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 }
 .gbody{position:relative;height:var(--colh)}
 .hlab{position:absolute;right:6px;transform:translateY(-6px);font-family:var(--fmono);font-size:10.5px;color:var(--muted)}
-.ghead{height:46px;border-bottom:1px solid var(--line)}
+.ghead{height:46px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:var(--surface)}
 
 .blk{position:absolute;left:3px;right:3px;border-radius:7px;padding:2px 6px;overflow:hidden;cursor:pointer;
   background:var(--pb,#fff);border:1px solid var(--pc,var(--line-strong));border-left-width:4px;line-height:1.25;transition:filter .12s}
@@ -177,6 +177,9 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .rawlist{margin-top:8px;border:1px solid #E8D8A8;border-radius:8px;overflow:hidden;background:#fff;max-height:170px;overflow-y:auto}
 .rawlist .flitem b{font-family:var(--fmono);font-weight:700;font-size:11.5px}
 
+.bugitem{border-bottom:1px solid var(--line);padding:8px 0}
+.bugitem:last-child{border-bottom:none}
+.bugpre{font-family:var(--fmono);font-size:10.5px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto;margin:4px 0}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw}
 .banner{background:#FBF4E3;border-bottom:1px solid #E8D8A8;padding:7px 14px;font-size:12.5px}
 </style>
@@ -185,7 +188,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v16</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v18</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -208,6 +211,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
     <span class="tot" id="wktot"></span>
     <button class="rawbtn" id="rawcount" hidden><span class="dot"></span><span></span></button>
     <button class="rawbtn" id="bperm" style="margin-left:auto">riepilogo permessi</button>
+    <button class="rawbtn" id="bbug">segnala bug</button>
   </div>
 </header>
 
@@ -221,6 +225,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
+const APP_VER='v18';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
@@ -284,6 +289,78 @@ async function sSet(k,v){
   if(hasStorage){ try{ await window.storage.set(k,JSON.stringify(v)); }catch(e){ toast('Salvataggio non riuscito — riprovo al prossimo cambiamento'); } return; }
   if(hasLocal){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} return; }
   memStore[k]=v;
+}
+
+/* ================= rilevazione bug ================= */
+let bugLog=[], crumbs=[];
+function crumb(t){ try{ crumbs.push(new Date().toTimeString().slice(0,8)+' '+t); if(crumbs.length>15) crumbs.shift(); }catch(e){} }
+document.addEventListener('click',ev=>{
+  try{
+    const b=ev.target.closest('button,select,.blk,.flitem,.pgitem,.chip');
+    if(!b) return;
+    const d=b.id?('#'+b.id):(b.className?('.'+String(b.className).split(' ')[0]):b.tagName.toLowerCase());
+    const tx=(b.textContent||'').trim().replace(/\s+/g,' ').slice(0,30);
+    crumb(d+(tx?(' «'+tx+'»'):''));
+  }catch(e){}
+},true);
+function updateBugBadge(){
+  const b=document.getElementById('bbug'); if(!b) return;
+  if(bugLog.length){ b.innerHTML='⚠ <b>'+bugLog.length+'</b> bug'; b.style.color='var(--danger)'; }
+  else { b.textContent='segnala bug'; b.style.color='var(--muted)'; }
+}
+function logBug(msg, src, line, col, stack, manual){
+  try{
+    bugLog.push({ t:new Date().toISOString(), msg:String(msg).slice(0,300),
+      where:(src?String(src).split('/').pop():'')+(line?(':'+line+(col?':'+col:'')):''),
+      stack:stack?String(stack).slice(0,800):'', trail:crumbs.slice(-8) });
+    if(bugLog.length>20) bugLog.shift();
+    sSet('ore-bugs',bugLog); updateBugBadge();
+    if(!manual) toast('⚠ Errore rilevato — aprilo da "bug" in alto a destra e copiami il report.');
+  }catch(e){}
+}
+window.addEventListener('error',ev=>{ logBug(ev.message||(ev.error&&ev.error.message)||'Errore', ev.filename, ev.lineno, ev.colno, ev.error&&ev.error.stack); });
+window.addEventListener('unhandledrejection',ev=>{ const r=ev.reason||{}; logBug('(promessa) '+(r.message||String(r)),'','','',r.stack); });
+function bugReport(){
+  const L=['=== REPORT BUG · Ore '+APP_VER+' ===',
+    'Browser: '+navigator.userAgent,
+    'Generato: '+new Date().toLocaleString('it-IT'),
+    'Stato: '+Object.keys(entries).length+' blocchi · '+cfg.projects.filter(p=>p.state==='active').length+' progetti attivi · utente '+(cfg.user||'—'),
+    'Errori registrati: '+bugLog.length,''];
+  bugLog.slice().reverse().forEach((e,i)=>{
+    L.push('['+(i+1)+'] '+e.t.replace('T',' ').slice(0,19));
+    L.push(e.msg+(e.where?('  @ '+e.where):''));
+    if(e.stack) L.push(e.stack);
+    if(e.trail&&e.trail.length) L.push('Ultime azioni: '+e.trail.join(' -> '));
+    L.push('');
+  });
+  return L.join('\n');
+}
+function openBugs(){
+  const root=document.getElementById('modalroot');
+  const draw=()=>{
+    root.querySelector('#bugbody').innerHTML = bugLog.length
+      ? bugLog.slice().reverse().map(e=>`<div class="bugitem"><b>${esc(e.msg)}</b><div class="hint" style="margin:2px 0 4px">${esc(e.t.replace('T',' ').slice(0,19))}${e.where?(' · '+esc(e.where)):''}</div>${e.stack?`<pre class="bugpre">${esc(e.stack)}</pre>`:''}${e.trail&&e.trail.length?`<div class="hint">Ultime azioni: ${esc(e.trail.join(' → '))}</div>`:''}</div>`).join('')
+      : '<div class="hint" style="margin:12px 0">Nessun errore rilevato finora. Se l\'app ha appena fatto qualcosa di strano senza messaggi di errore, premi "Segnala adesso": catturo le ultime azioni così posso ricostruire l\'accaduto.</div>';
+    root.querySelector('#bugcopy').disabled=!bugLog.length;
+    root.querySelector('#bugclear').disabled=!bugLog.length;
+  };
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:640px">
+    <div class="mhead"><h2>Bug rilevati</h2><button class="x" id="mx">×</button></div>
+    <div id="bugbody"></div>
+    <div class="mfoot">
+      <button class="btn" id="bugnow">Segnala adesso</button>
+      <button class="btn" id="bugclear">Svuota</button>
+      <div class="grow"></div>
+      <button class="btn primary" id="bugcopy">Copia report per Claude</button>
+    </div>
+    <div class="hint">Incolla il report nella chat: contiene versione, browser, errori con dettagli e le ultime azioni fatte.</div>
+  </div></div>`;
+  root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
+  root.querySelector('#bugnow').onclick=()=>{ logBug('Segnalazione manuale: comportamento anomalo senza errore','','','','',true); draw(); };
+  root.querySelector('#bugclear').onclick=()=>{ bugLog=[]; sSet('ore-bugs',bugLog); updateBugBadge(); draw(); };
+  root.querySelector('#bugcopy').onclick=()=>copyText(bugReport(),'Report copiato: incollalo nella chat con Claude.');
+  draw();
 }
 
 /* ================= stato ================= */
@@ -1110,6 +1187,7 @@ function saveXlsx(){
 /* ================= toast ================= */
 let toastT=null;
 function toast(msg){
+  crumb('toast: '+String(msg).slice(0,40));
   const r=document.getElementById('toastroot');
   r.innerHTML='<div class="toast">'+esc(msg)+'</div>';
   clearTimeout(toastT); toastT=setTimeout(()=>r.innerHTML='',4200);
@@ -1152,9 +1230,13 @@ document.getElementById('rawcount').onclick=()=>openWizard();
   const c=await sGet('ore-cfg'); if(c) cfg=c;
   const e=await sGet('ore-entries'); if(e) entries=e;
   const d=await sGet('ore-dict'); if(d) dict=d;
+  const bg=await sGet('ore-bugs'); if(bg) bugLog=bg;
+  const av=document.getElementById('appver'); if(av) av.textContent=APP_VER;
+  updateBugBadge();
+  document.getElementById('bbug').onclick=openBugs;
   ensureHues(true); buildKw(); renderAll();
   dirty=false; updateDirty();
-  try{ window.scrollTo(0, 7*60/SLOT*SLOT_PX - 20); }catch(err){}
+  try{ const cw=document.querySelector('.calwrap'); if(cw) cw.scrollTop = 7*60/SLOT*SLOT_PX - 10; }catch(err){}
   setInterval(()=>{
     const n=new Date(), tk=dayKey(n);
     const nl=document.querySelector('.nowline');
