@@ -188,7 +188,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v18</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v20</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -225,13 +225,14 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v18';
+const APP_VER='v20';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
 const DOW = ['lun','mar','mer','gio','ven','sab','dom'];
 const MON = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
 
+const COARSE = (typeof matchMedia==='function') && matchMedia('(pointer: coarse)').matches;
 const pad = n => String(n).padStart(2,'0');
 const dayKey = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const fromKey = k => { const [y,m,g]=k.split('-').map(Number); return new Date(y,m-1,g); };
@@ -541,9 +542,9 @@ function bindCalendar(){
     const id=el.dataset.id;
     el.addEventListener('mouseenter',()=>{ hoverEntryId=id; });
     el.addEventListener('mouseleave',()=>{ if(hoverEntryId===id) hoverEntryId=null; });
-    el.addEventListener('click',ev=>ev.stopPropagation());
-    el.addEventListener('mousedown',ev=>{
-      if(ev.button!==0) return;
+    el.addEventListener('click',ev=>{ ev.stopPropagation(); if(COARSE){ const ent=entries[id]; if(ent) openEditor(ent); } });
+    el.addEventListener('pointerdown',ev=>{
+      if(ev.button!==0 || ev.pointerType!=='mouse') return;
       ev.stopPropagation();
       const ent=entries[id]; if(!ent) return;
       const mode = ev.target.classList&&ev.target.classList.contains('rs')
@@ -558,26 +559,34 @@ function bindCalendar(){
         start:Math.max(DAY_START,Math.min(DAY_END-SLOT, DAY_START+Math.floor((ev.clientY-r.top)/SLOT_PX)*SLOT)) };
     });
     col.addEventListener('mouseleave',()=>{ if(hoverSlot&&hoverSlot.day===col.dataset.day) hoverSlot=null; });
-    let dragStart=null, ghost=null;
-    col.addEventListener('mousedown',ev=>{
-      if(ev.target!==col) return;
-      dragStart={y:ev.offsetY};
-      ghost=document.createElement('div'); ghost.className='ghost'; col.appendChild(ghost);
-      positionGhost(ghost,dragStart.y,dragStart.y);
-      const move=e2=>{ const r=col.getBoundingClientRect(); positionGhost(ghost, dragStart.y, e2.clientY-r.top); };
+    col.addEventListener('pointerdown',ev=>{
+      if(ev.target!==col || ev.pointerType!=='mouse' || ev.button!==0) return;
+      document.querySelectorAll('.ghost').forEach(g=>g.remove());
+      try{ col.setPointerCapture(ev.pointerId); }catch(_){}
+      const startY=ev.offsetY;
+      let ghost=document.createElement('div'); ghost.className='ghost'; col.appendChild(ghost);
+      positionGhost(ghost,startY,startY);
+      let done=false;
+      const cleanup=()=>{
+        col.removeEventListener('pointermove',move); col.removeEventListener('pointerup',up);
+        col.removeEventListener('pointercancel',cancel); col.removeEventListener('lostpointercapture',cancel);
+        try{ col.releasePointerCapture(ev.pointerId); }catch(_){}
+        if(ghost){ ghost.remove(); ghost=null; }
+      };
+      const move=e2=>{ const r=col.getBoundingClientRect(); positionGhost(ghost, startY, e2.clientY-r.top); };
+      const cancel=()=>{ if(done) return; done=true; cleanup(); };
       const up=e2=>{
-        document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+        if(done) return; done=true; cleanup();
         const r=col.getBoundingClientRect(); const y2=e2.clientY-r.top;
-        ghost.remove(); ghost=null;
-        const a=Math.min(dragStart.y,y2), b=Math.max(dragStart.y,y2);
+        const a=Math.min(startY,y2), b=Math.max(startY,y2);
         const start=snap(a);
         let dur = (b-a)>10 ? Math.max(SLOT, (Math.ceil(b/SLOT_PX)*SLOT+DAY_START)-start) : 60;
         dur=Math.min(dur, DAY_END-start);
         col.dataset.skip='1';
         openEditor({ id:null, day:col.dataset.day, start, dur, text:'', project:null, label:null, permesso:false, exported:false });
-        dragStart=null;
       };
-      document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+      col.addEventListener('pointermove',move); col.addEventListener('pointerup',up);
+      col.addEventListener('pointercancel',cancel); col.addEventListener('lostpointercapture',cancel);
     });
     col.addEventListener('click',ev=>{
       if(ev.target!==col) return;
@@ -593,14 +602,23 @@ function bindCalendar(){
 /* trascinamento di un blocco: sposta (mv), ridimensiona dal bordo alto (rt) o basso (rb) */
 function startBlockDrag(ev, ent, el, mode){
   ev.preventDefault();
+  document.querySelectorAll('.ghost').forEach(g=>g.remove());
+  try{ el.setPointerCapture(ev.pointerId); }catch(_){}
   const cols=[...document.querySelectorAll('.dbody')].map(c=>({el:c,day:c.dataset.day,rect:c.getBoundingClientRect()}));
   const origin=cols.find(c=>c.day===ent.day);
   const grabOff=origin ? (ev.clientY-origin.rect.top) - (ent.start-DAY_START)/SLOT*SLOT_PX : 0;
-  let dragging=false, ghost=null, target={day:ent.day,start:ent.start,dur:ent.dur};
+  let dragging=false, ghost=null, done=false, target={day:ent.day,start:ent.start,dur:ent.dur};
   const sx=ev.clientX, sy=ev.clientY;
   const colAt=x=>cols.find(c=>x>=c.rect.left&&x<c.rect.right);
   const ensureGhost=col=>{ if(!ghost){ghost=document.createElement('div');ghost.className='ghost';} if(ghost.parentNode!==col.el) col.el.appendChild(ghost); };
   const paint=()=>{ ghost.style.top=((target.start-DAY_START)/SLOT*SLOT_PX)+'px'; ghost.style.height=(target.dur/SLOT*SLOT_PX)+'px'; };
+  const cleanup=()=>{
+    el.removeEventListener('pointermove',move); el.removeEventListener('pointerup',up);
+    el.removeEventListener('pointercancel',cancel); el.removeEventListener('lostpointercapture',cancel);
+    try{ el.releasePointerCapture(ev.pointerId); }catch(_){}
+    if(ghost) ghost.remove(); el.classList.remove('dragging'); document.body.style.userSelect='';
+  };
+  const cancel=()=>{ if(done) return; done=true; cleanup(); };
   const move=e2=>{
     if(!dragging && Math.abs(e2.clientX-sx)+Math.abs(e2.clientY-sy)<5) return;
     if(!dragging){ dragging=true; el.classList.add('dragging'); document.body.style.userSelect='none'; }
@@ -627,8 +645,7 @@ function startBlockDrag(ev, ent, el, mode){
     }
   };
   const up=e2=>{
-    document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
-    if(ghost) ghost.remove(); el.classList.remove('dragging'); document.body.style.userSelect='';
+    if(done) return; done=true; cleanup();
     if(!dragging){ openEditor(ent); return; }
     if(mode==='mv' && (e2.altKey||e2.ctrlKey)){
       const ne={...ent, id:uid(), day:target.day, start:target.start, exported:false, seq:0, created:new Date().toISOString().replace(/[-:]/g,'').slice(0,15)+'Z'};
@@ -639,7 +656,8 @@ function startBlockDrag(ev, ent, el, mode){
     }
     saveEntries(); renderAll();
   };
-  document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+  el.addEventListener('pointermove',move); el.addEventListener('pointerup',up);
+  el.addEventListener('pointercancel',cancel); el.addEventListener('lostpointercapture',cancel);
 }
 function positionGhost(g,y1,y2){
   const a=Math.min(y1,y2), b=Math.max(y1,y2);
