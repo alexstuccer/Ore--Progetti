@@ -132,6 +132,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .pgitem:hover{background:#FAFBF9}
 .pgitem.sel{background:var(--pb);border-color:var(--pc);box-shadow:inset 0 0 0 1px var(--pc)}
 .pgitem.sug:not(.sel){border-color:var(--accent)}
+.pgitem.prop{border-style:dashed;border-color:var(--accent);border-left-style:solid}
 .pgitem .pgc{font-family:var(--fmono);font-size:11.5px;font-weight:700;color:var(--pc,var(--ink));flex:none}
 .pgitem .pgn{font-size:11.5px;color:var(--ink);line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pgitem .star{color:var(--accent-ink);flex:none;font-size:11px}
@@ -184,7 +185,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v13</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v14</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -366,22 +367,26 @@ function renderAll(){
     const k=dayKey(d), list=entriesOfDay(k);
     let assigned=0, raw=0;
     let blocks='';
+    const laid=[];
     for(const e of list){
       if(!passFilter(e)) continue;
+      let depth=0; for(const L of laid) if(L.end>e.start && L.start<e.start+e.dur) depth++;
+      laid.push({start:e.start, end:e.start+e.dur});
+      const off=`left:${3+depth*12}px;z-index:${1+depth};`;
       const top=(e.start-DAY_START)/SLOT*SLOT_PX, h=Math.max(e.dur/SLOT*SLOT_PX-2,12);
       const time=fmtTime(e.start)+'–'+fmtTime(e.start+e.dur);
       if(e.permesso){
-        blocks+=`<div class="blk perm" style="top:${top}px;height:${h}px" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
+        blocks+=`<div class="blk perm" style="${off}top:${top}px;height:${h}px" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
           <span class="bt">${time}</span><div class="btx">${esc(e.text)||'Permesso'}</div><div class="bmeta">permesso · non va nel foglio</div></div>`;
       } else if(e.project && e.label){
         assigned+=e.dur;
         const c=projColor(e.project), code=e.project.split(' - ')[0];
-        blocks+=`<div class="blk" style="top:${top}px;height:${h}px;--pb:${c.bg};--pc:${c.ln}" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
+        blocks+=`<div class="blk" style="${off}top:${top}px;height:${h}px;--pb:${c.bg};--pc:${c.ln}" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
           <span class="bt">${time}</span><div class="btx">${esc(e.text)||esc(e.label)}</div>
           <div class="bmeta">${esc(code)} · ${esc(e.label)}</div>${e.exported?'<span class="chk" title="già esportata">✓</span>':''}</div>`;
       } else {
         raw+=e.dur;
-        blocks+=`<div class="blk raw" style="top:${top}px;height:${h}px" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
+        blocks+=`<div class="blk raw" style="${off}top:${top}px;height:${h}px" data-id="${e.id}"><div class="rs rs-t"></div><div class="rs rs-b"></div>
           <span class="bt">${time}</span><div class="btx">${esc(e.text)||'(senza testo)'}</div><div class="bmeta">da assegnare</div></div>`;
       }
     }
@@ -572,6 +577,7 @@ function openEditor(e, onDone, nav){
       <div class="frow"><label>Progetto</label>
         <input type="text" id="pfq" class="fsearch" placeholder="Filtra i tuoi progetti…" autocomplete="off">
         <div class="pgrid" id="pchips"></div>
+        <div class="suglabel" id="psug"></div>
         ${actives.length?'':'<div class="hint">Nessun progetto attivo: aprili da “Progetti” in alto.</div>'}</div>
       <div class="frow"><label>Attività</label>
         <input type="text" id="elabq" class="fsearch" style="margin-bottom:0" placeholder="Cerca attività…" autocomplete="off" value="${esc(e.label||'')}">
@@ -596,26 +602,31 @@ function openEditor(e, onDone, nav){
   $('ov').addEventListener('click',ev=>{ if(ev.target.id==='ov') close(); });
   document.addEventListener('keydown',function esck(ev){ if(ev.key==='Escape'){close();document.removeEventListener('keydown',esck);} });
 
-  const pgItem=(name,sel,isSug)=>{
+  const pgItem=(name,sel,isSug,isProp)=>{
     const c=projColor(name), code=name.split(' - ')[0].trim();
     const desc=name.slice(code.length).replace(/^\s*-\s*/,'');
-    return `<button type="button" class="pgitem ${sel?'sel':''} ${isSug?'sug':''}" data-p="${esc(name)}" style="--pb:${c.bg};--pc:${c.ln}">
-      ${isSug?'<span class="star">★</span>':''}<span class="pgc">${esc(code)}</span><span class="pgn">${esc(desc)}</span></button>`;
+    return `<button type="button" class="pgitem ${sel?'sel':''} ${isSug?'sug':''} ${isProp?'prop':''}" data-p="${esc(name)}" style="--pb:${c.bg};--pc:${c.ln}">
+      ${(isSug||isProp)?'<span class="star">★</span>':''}<span class="pgc">${esc(code)}</span><span class="pgn">${esc(desc)}</span></button>`;
   };
   const renderChips=()=>{
     $('pchips').className='pgrid';
     const fq=$('pfq'); if(fq) fq.style.display='';
     const q=((fq&&fq.value)||'').toLowerCase();
     const sug=edState.sug?.project;
+    const proposed = !!edState.project && !edState.manualP;
     let html='';
-    if(edState.project && !actives.find(p=>p.name===edState.project)) html+=pgItem(edState.project,true,false);
+    if(edState.project && !actives.find(p=>p.name===edState.project)) html+=pgItem(edState.project,true,false,proposed);
     html+=actives.filter(p=>!q||p.name.toLowerCase().includes(q)||p.name===edState.project)
-      .map(p=>pgItem(p.name, edState.project===p.name, edState.project!==p.name&&sug===p.name)).join('');
+      .map(p=>pgItem(p.name, edState.project===p.name, edState.project!==p.name&&sug===p.name, edState.project===p.name&&proposed)).join('');
     html+=`<button type="button" class="pgitem pgother" id="pother" title="Scegli tra tutti i progetti, anche non tuoi">altro…</button>`;
     $('pchips').innerHTML=html;
+    const ps=$('psug'); if(ps) ps.textContent = proposed ? '★ proposta automatica dal testo — con Salva la confermi, un clic la fissa, due la tolgono' : '';
     $('pchips').querySelectorAll('.pgitem[data-p]').forEach(ch=>ch.onclick=()=>{
-      edState.project = edState.project===ch.dataset.p ? null : ch.dataset.p;
-      edState.manualP = !!edState.project; renderChips();
+      if(edState.project===ch.dataset.p){
+        if(!edState.manualP){ edState.manualP=true; }
+        else { edState.project=null; edState.manualP=false; }
+      } else { edState.project=ch.dataset.p; edState.manualP=true; }
+      renderChips();
     });
     const po=$('pother'); if(po) po.onclick=openFullPicker;
   };
@@ -636,7 +647,7 @@ function openEditor(e, onDone, nav){
   };
   const applySug=()=>{
     edState.sug=suggest($('etx').value);
-    if(!edState.manualP && edState.sug.project) edState.project=edState.sug.project;
+    if(!edState.manualP) edState.project=edState.sug.project||null;
     if(!edState.manualL){
       if(edState.sug.label){ edState.label=edState.sug.label; $('elabq').value=edState.label; $('lsug').textContent='★ suggerita: '+edState.label; }
       else $('lsug').textContent='';
