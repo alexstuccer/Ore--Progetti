@@ -31,6 +31,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .hrow{display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
 .brand{font-weight:800;font-size:19px;letter-spacing:-.4px}
 .brand .sheet{color:var(--accent);font-weight:700;font-size:13px;margin-left:6px;font-family:var(--fmono);letter-spacing:0}
+.brand .ver{font-size:10px;color:var(--muted);font-family:var(--fmono);margin-left:7px;font-weight:400;vertical-align:super}
 .wknav{display:flex;align-items:center;gap:4px;margin-left:6px}
 .wknav button{background:none;border:1px solid var(--line);border-radius:8px;width:30px;height:30px;font-size:15px;color:var(--ink)}
 .wknav button:hover{background:var(--accent-soft)}
@@ -183,7 +184,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver">v12</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -689,10 +690,11 @@ function openEditor(e, onDone, nav){
 }
 
 /* ================= wizard assegnazione ================= */
-function openWizard(onFinish){
+function openWizard(onFinish, startId){
   const queue=()=>Object.values(entries).filter(x=>!x.permesso&&!(x.project&&x.label))
     .sort((a,b)=>a.day<b.day?-1:a.day>b.day?1:a.start-b.start).map(x=>x.id);
   let pos=0;
+  if(startId){ const i=queue().indexOf(startId); if(i>=0) pos=i; }
   const exit=done=>{ renderAll(); if(done) toast('Tutto assegnato ✓'); if(onFinish) onFinish(); };
   const show=()=>{
     const ids=queue();
@@ -873,7 +875,7 @@ function openExport(initFrom, initTo, initIncl){
         :`<div class="hint" style="margin:14px 0">${(dFrom||dTo)?'Niente da esportare in questo intervallo: o è già copiato, o è ancora da assegnare.':'Niente da esportare: tutto già copiato nel foglio.'}</div>`)+
       `<label class="hint" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="iexp" ${inclExp?'checked':''}> includi anche le righe già esportate</label>`;
     root.querySelectorAll('[data-rid]').forEach(b=>b.onclick=()=>{
-      openEditor(entries[b.dataset.rid], ()=>openExport(dFrom,dTo,inclExp));
+      openWizard(()=>openExport(dFrom,dTo,inclExp), b.dataset.rid);
     });
     const wg=root.querySelector('#wizgo');
     if(wg) wg.onclick=()=>openWizard(()=>openExport(dFrom,dTo,inclExp));
