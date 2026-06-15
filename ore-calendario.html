@@ -37,7 +37,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .wknav button{background:none;border:1px solid var(--line);border-radius:8px;width:30px;height:30px;font-size:15px;color:var(--ink)}
 .wknav button:hover{background:var(--accent-soft)}
 .wknav .today{width:auto;padding:0 10px;font-size:12.5px}
-.wklabel{font-family:var(--fmono);font-size:13px;color:var(--ink);min-width:130px;text-align:center;background:none;border:none;cursor:pointer;padding:4px 2px;border-radius:6px}
+.wklabel{font-family:var(--fmono);font-size:13px;color:var(--ink);min-width:172px;white-space:nowrap;text-align:center;background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px}
 .wklabel:hover{background:var(--accent-soft)}
 .pfsel{border:1px solid var(--line);border-radius:7px;padding:4px 6px;font-size:12.5px;font-family:var(--fui);color:var(--ink);background:#fff;max-width:230px}
 .spacer{flex:1}
@@ -202,7 +202,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v21</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v26</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -241,7 +241,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v21';
+const APP_VER='v26';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
