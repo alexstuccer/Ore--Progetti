@@ -7,6 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230E6B5B'/%3E%3Crect x='12' y='14' width='40' height='9' rx='3' fill='%23ffffff'/%3E%3Crect x='12' y='28' width='28' height='9' rx='3' fill='%23ffffff' opacity='.72'/%3E%3Crect x='12' y='42' width='34' height='9' rx='3' fill='%23ffffff' opacity='.5'/%3E%3C/svg%3E">
 <meta name="theme-color" content="#0E6B5B">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{
   --bg:#F4F6F2; --surface:#FFFFFF; --ink:#1F262B; --muted:#69737C;
@@ -987,51 +988,108 @@ function openCartExport(){
   draw();
 }
 
-function genCartellino(year, month){
-  if(typeof XLSX==='undefined'){ toast('Libreria Excel non caricata.'); return; }
+async function genCartellino(year, month){
+  if(typeof JSZip==='undefined'){ toast('Libreria di scrittura non caricata: controlla la connessione.'); return; }
   if(!cfg.cartTemplate){ toast('Manca il modello cartellino.'); return; }
   try{
     const bytes=Uint8Array.from(atob(cfg.cartTemplate), c=>c.charCodeAt(0));
-    const wb=XLSX.read(bytes,{type:'array',cellStyles:true,cellNF:true});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    // intestazione: anno (A4), mese (C4), matricola (F4), nome (K4)
-    const set=(addr,v)=>{ ws[addr]=ws[addr]||{}; ws[addr].v=v; ws[addr].t=typeof v==='number'?'n':'s'; delete ws[addr].f; };
-    set('A4', year);
-    set('C4', MONTHS_IT[month]);
-    if(cfg.cartMat) set('F4', isNaN(+cfg.cartMat)?cfg.cartMat:+cfg.cartMat);
-    if(cfg.cartName) set('K4', cfg.cartName);
-    // le righe giorno partono da 7 (giorno 1) fino a 7+gg-1
-    const daysIn=new Date(year,month+1,0).getDate();
-    const COLS={stato:'C',d:'D',e:'E',f:'F',g:'G',h:'H',i:'I',j:'J',ka:'K',mal:'P',perm:'Q',fer:'R'};
-    const t2x=hhmm=>{ const [h,m]=hhmm.split(':').map(Number); return (h*60+m)/1440; };
-    for(let day=1; day<=daysIn; day++){
-      const row=6+day; const k=`${year}-${pad(month+1)}-${pad(day)}`;
-      const dt=dayTypeOf(k);
-      // pulisco le celle editabili della riga (non tocco L,M,N,O che hanno formule)
-      for(const col of ['C','D','E','F','G','H','I','J','K','P','Q','R']){ const a=col+row; if(ws[a]){ delete ws[a].v; delete ws[a].f; ws[a].t='z'; } }
-      if(dt==='ferie'||dt==='chiusura'){ set(COLS.fer+row, 1); set(COLS.stato+row,'Ferie'); continue; }
-      if(dt==='malattia'){ set(COLS.mal+row, 1); set(COLS.stato+row,'Malattia'); continue; }
-      if(dt==='festivo'||dt==='nonlav'){ continue; } // riga vuota
-      // giorno lavorativo: ricostruisco le finestre dai blocchi
-      const wins=presenceWindows(k);
-      set(COLS.stato+row,'Lavoro');
-      let slots;
-      if(!wins){ slots=[STD[0],STD[1],STD[2],STD[3]]; } // nessun blocco: assumo giornata piena
+    const zip=await JSZip.loadAsync(bytes);
+    const sheetPath='xl/worksheets/sheet1.xml';
+    let xml=await zip.file(sheetPath).async('string');
+
+    // --- preparo uno stile "mese" (mostra mmmm) clonando lo stile attuale di C4 ---
+    let monthStyleIdx=null;
+    try{
+      let styles=await zip.file('xl/styles.xml').async('string');
+      // recupero lo stile attuale di C4 dall'xml del foglio
+      const c4=xml.match(/<c r="C4"([^>]*)/);
+      const c4s=c4 ? (c4[1].match(/\ss="(\d+)"/)||[])[1] : null;
+      // numFmt mmmm (id 169) se non c'è
+      if(!/numFmtId="169"/.test(styles)){
+        if(/<numFmts count="(\d+)"/.test(styles)){
+          styles=styles.replace(/<numFmts count="(\d+)">/, (m,n)=>`<numFmts count="${+n+1}">`)
+                       .replace('</numFmts>', '<numFmt numFmtId="169" formatCode="mmmm"/></numFmts>');
+        } else {
+          styles=styles.replace('<cellXfs', '<numFmts count="1"><numFmt numFmtId="169" formatCode="mmmm"/></numFmts><cellXfs');
+        }
+      }
+      // clono l'xf di C4 aggiungendo numFmtId=169, lo accodo a cellXfs
+      const xfsM=styles.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
+      const xfList=xfsM[2].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g);
+      let baseXf = (c4s!=null && xfList[+c4s]) ? xfList[+c4s] : '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>';
+      let newXf = baseXf.replace(/numFmtId="\d+"/, 'numFmtId="169"');
+      if(!/applyNumberFormat/.test(newXf)) newXf=newXf.replace('<xf ', '<xf applyNumberFormat="1" ');
+      monthStyleIdx = xfList.length;
+      styles=styles.replace(/<cellXfs count="\d+">/, `<cellXfs count="${xfList.length+1}">`)
+                   .replace('</cellXfs>', newXf+'</cellXfs>');
+      zip.file('xl/styles.xml', styles);
+    }catch(_){ monthStyleIdx=null; }
+
+    const t2frac=hhmm=>{ const [h,m]=hhmm.split(':').map(Number); return ((h*60+m)/1440).toFixed(10).replace(/0+$/,'').replace(/\.$/,'.0'); };
+    const xmlEsc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    // sostituisce/crea una cella; kind: 'n' numero | 'str' testo inline | 'f' formula | 'blank' | 'nstyle' numero con stile forzato
+    function setCell(addr, kind, val, forceStyle){
+      const reFull=new RegExp('<c r="'+addr+'"([^>]*?)(?:/>|>.*?</c>)','s');
+      const m=xml.match(reFull);
+      let style='';
+      if(forceStyle!=null) style=' s="'+forceStyle+'"';
+      else if(m){ const sm=m[1].match(/\ss="(\d+)"/); if(sm) style=' s="'+sm[1]+'"'; }
+      let cell;
+      if(kind==='blank') cell='<c r="'+addr+'"'+style+'/>';
+      else if(kind==='n') cell='<c r="'+addr+'"'+style+'><v>'+val+'</v></c>';
+      else if(kind==='f') cell='<c r="'+addr+'"'+style+'><f>'+xmlEsc(val)+'</f></c>';
+      else cell='<c r="'+addr+'"'+style+' t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(val)+'</t></is></c>';
+      if(m){ xml=xml.replace(m[0], cell); }
       else {
-        // incastro le finestre nelle 4 colonne D,E,F,G (e H,I,J,K se servono 3+)
-        slots=[];
-        for(const w of wins){ slots.push(w[0],w[1]); }
+        const rowNum=addr.match(/\d+/)[0];
+        const rowRe=new RegExp('(<row r="'+rowNum+'"[^>]*>)(.*?)(</row>)','s');
+        const rm=xml.match(rowRe);
+        if(rm){ xml=xml.replace(rm[0], rm[1]+rm[2]+cell+rm[3]); }
       }
-      const cells=['D','E','F','G','H','I','J','K']; // 4 coppie: (D-E),(F-G),(H-I),(J-K)
-      for(let i=0;i<slots.length && i<cells.length;i++){
-        const a=cells[i]+row; ws[a]={t:'n', v:t2x(slots[i]), z:'hh:mm'};
-      }
-      if(slots.length>8) toast('Giorno '+day+': più di 4 fasce, controlla a mano.');
     }
+
+    // intestazione: anno, mese (numero seriale data 1° del mese, mostrato come mmmm), matricola, nome
+    setCell('A4','n', year);
+    const monthSerial=Math.round((new Date(Date.UTC(year,month,1)) - new Date(Date.UTC(1899,11,30)))/86400000);
+    if(monthStyleIdx!=null) setCell('C4','n', monthSerial, monthStyleIdx);
+    else setCell('C4','str', MONTHS_IT[month]);
+    if(cfg.cartMat) setCell('F4', isNaN(+cfg.cartMat)?'str':'n', isNaN(+cfg.cartMat)?cfg.cartMat:+cfg.cartMat);
+    if(cfg.cartName) setCell('K4','str', cfg.cartName);
+
+    const daysIn=new Date(year,month+1,0).getDate();
+    let over=0;
+    for(let day=1; day<=daysIn; day++){
+      const row=6+day, k=`${year}-${pad(month+1)}-${pad(day)}`;
+      const dt=dayTypeOf(k);
+      // colonna A: formula viva = giorno settimana da anno (A4) e mese (C4); B: numero giorno
+      setCell('A'+row,'f', 'TEXT(DATE(YEAR($C$4),MONTH($C$4),B'+row+'),"dddd")');
+      setCell('B'+row,'n', day);
+      for(const col of ['C','D','E','F','G','H','I','J','K','P','Q','R']) setCell(col+row,'blank');
+      if(dt==='ferie'||dt==='chiusura'){ setCell('C'+row,'str','Ferie'); setCell('R'+row,'n',1); continue; }
+      if(dt==='malattia'){ setCell('C'+row,'str','Malattia'); setCell('P'+row,'n',1); continue; }
+      if(dt==='festivo'||dt==='nonlav'){ continue; }
+      const wins=presenceWindows(k);
+      setCell('C'+row,'str','Lavoro');
+      let slots; if(!wins) slots=[...STD]; else { slots=[]; for(const w of wins) slots.push(w[0],w[1]); }
+      const cells=['D','E','F','G','H','I','J','K'];
+      for(let i=0;i<slots.length && i<cells.length;i++) setCell(cells[i]+row,'n', t2frac(slots[i]));
+      if(slots.length>8) over++;
+    }
+
+    zip.file(sheetPath, xml);
+    // forzo il ricalcolo delle formule all'apertura
+    try{ let wbx=await zip.file('xl/workbook.xml').async('string');
+      if(!/fullCalcOnLoad/.test(wbx)){ wbx=wbx.replace(/<calcPr([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
+        if(!/fullCalcOnLoad/.test(wbx)) wbx=wbx.replace('</workbook>','<calcPr fullCalcOnLoad="1"/></workbook>');
+        zip.file('xl/workbook.xml', wbx); }
+    }catch(_){}
+
+    const blob=await zip.generateAsync({type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const fname=`Cartellino_${cfg.cartName?cfg.cartName.split(' ').pop():'AFe'}_${String(year).slice(2)}_${pad(month+1)}.xlsx`;
-    XLSX.writeFile(wb, fname);
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; a.click(); URL.revokeObjectURL(a.href);
     document.getElementById('modalroot').innerHTML='';
-    toast('Cartellino generato: '+fname+' — controlla e completa eventuali permessi parziali.');
+    toast('Cartellino generato: '+fname+(over?' — '+over+' giorni con +4 fasce, controllali':' — controlla i permessi parziali'));
   }catch(e){ toast('Errore nella generazione: '+e.message); logBug('genCartellino: '+e.message,'','','',e.stack); }
 }
 
@@ -1097,24 +1155,30 @@ function openCartellino(){
 /* ================= patrono ================= */
 function openPatron(){
   const root=document.getElementById('modalroot');
-  const cur=cfg.patronDate||''; const y=new Date().getFullYear();
-  const val = cur ? y+'-'+cur : '';
+  const cur=cfg.patronDate||''; // 'MM-DD'
+  const curM=cur?+cur.slice(0,2):0, curD=cur?+cur.slice(3):0;
+  const dOpts=()=>{ let o='<option value="">—</option>'; for(let i=1;i<=31;i++) o+=`<option value="${i}" ${i===curD?'selected':''}>${i}</option>`; return o; };
+  const mOpts=()=>{ let o='<option value="">—</option>'; for(let i=1;i<=12;i++) o+=`<option value="${i}" ${i===curM?'selected':''}>${MON[i-1]}</option>`; return o; };
   root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:440px">
     <div class="mhead"><h2>Santo patrono</h2><button class="x" id="mx">×</button></div>
-    <div class="hint" style="margin-bottom:12px">Il giorno del patrono locale diventa festivo ogni anno. Per i comuni con più frazioni, scegli quella che vale per te.</div>
+    <div class="hint" style="margin-bottom:12px">Il giorno del patrono locale diventa festivo ogni anno. Per i comuni con più frazioni, scegli quella che vale per te. Se cambi sede, aggiornalo qui.</div>
     <div class="frow"><label>Nome (facoltativo)</label><input type="text" id="patname" placeholder="es. San Giovanni" value="${esc(cfg.patronName||'')}"></div>
-    <div class="frow"><label>Giorno</label><input type="date" id="patday" value="${val}"></div>
+    <div class="inline">
+      <div class="frow"><label>Giorno</label><select id="patd">${dOpts()}</select></div>
+      <div class="frow" style="flex:2"><label>Mese</label><select id="patm">${mOpts()}</select></div>
+    </div>
     <div class="mfoot"><button class="btn danger" id="patclr" ${cur?'':'disabled'}>Rimuovi</button><div class="grow"></div>
       <button class="btn" id="patcanc">Annulla</button><button class="btn primary" id="patok">Salva</button></div>
   </div></div>`;
-  const close=()=>{root.innerHTML='';renderAll();};
-  root.querySelector('#mx').onclick=root.querySelector('#patcanc').onclick=()=>{root.innerHTML='';};
-  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
-  root.querySelector('#patclr').onclick=()=>{ delete cfg.patronDate; delete cfg.patronName; saveCfg(); close(); };
+  const back=()=>{ root.innerHTML=''; if(cfg.user||cfg.cartName!==undefined) openCartellino(); else renderAll(); };
+  root.querySelector('#mx').onclick=root.querySelector('#patcanc').onclick=back;
+  ovGuard(root.querySelector('#ov'), back);
+  root.querySelector('#patclr').onclick=()=>{ delete cfg.patronDate; delete cfg.patronName; saveCfg(); back(); };
   root.querySelector('#patok').onclick=()=>{
-    const v=root.querySelector('#patday').value;
-    if(v){ cfg.patronDate=v.slice(5); cfg.patronName=root.querySelector('#patname').value.trim()||null; saveCfg(); }
-    close();
+    const dd=+root.querySelector('#patd').value, mo=+root.querySelector('#patm').value;
+    if(dd&&mo){ cfg.patronDate=pad(mo)+'-'+pad(dd); cfg.patronName=root.querySelector('#patname').value.trim()||null; saveCfg(); }
+    else if(!dd&&!mo){ delete cfg.patronDate; delete cfg.patronName; saveCfg(); }
+    back();
   };
 }
 
