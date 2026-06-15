@@ -68,6 +68,19 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 .day.today .dbody{background-color:#EFF6F2}
 .nowline{position:absolute;left:0;right:0;height:0;border-top:2px solid #D6453A;z-index:4;pointer-events:none}
 .nowline span{position:absolute;left:-1px;top:-5px;width:8px;height:8px;border-radius:50%;background:#D6453A}
+.dbody.dt-ferie{background-color:#DCEBFB}
+.dbody.dt-malattia{background-color:#FBE0E0}
+.dbody.dt-festivo{background-color:#EFE4F7}
+.dbody.dt-nonlav{background-color:#ECECE6}
+.dbody.dt-chiusura{background-color:#FBEEDA}
+.dt-tag{font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:99px;display:inline-block;margin-top:1px;width:fit-content}
+.dt-tag.ferie{background:#C5DCF5;color:#1C4E86}
+.dt-tag.malattia{background:#F3C9C9;color:#9A3030}
+.dt-tag.festivo{background:#DEC9EE;color:#5E3A86}
+.dt-tag.nonlav{background:#D8D8CE;color:#5A5A50}
+.dt-tag.chiusura{background:#F0D9AE;color:#8A5A1A}
+.dhead{cursor:pointer}
+.dhead:hover{background:#F6F8F4}
 .dbody{position:relative;height:var(--colh);
   background-image:
     repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--slot)*4 - 1px), var(--line) calc(var(--slot)*4 - 1px), var(--line) calc(var(--slot)*4)),
@@ -188,7 +201,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v20</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v21</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -201,6 +214,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
     <div class="spacer"></div>
     <div class="actions">
       <button class="btn" id="bproj">Progetti</button>
+      <button class="btn" id="bcart">Cartellino</button>
       <button class="btn" id="bics">Outlook (.ics)</button>
       <button class="btn" id="bsave">Salva .xlsx <span id="dirtydot" hidden style="color:var(--danger)">●</span></button>
       <button class="btn primary" id="bexp">Righe per il foglio</button>
@@ -220,12 +234,13 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 <div class="calwrap"><div class="cal" id="cal"></div></div>
 
 <input type="file" id="filein" accept=".xlsx,.xlsm" hidden>
+<input type="file" id="cartTemplateInput" accept=".xlsx,.xlsm" hidden>
 <div id="modalroot"></div>
 <div id="toastroot"></div>
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v20';
+const APP_VER='v21';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
@@ -367,6 +382,26 @@ function openBugs(){
 /* ================= stato ================= */
 let cfg = { projects:[], labels:[], loadedAt:null };  // projects: {name, code, state:'active'|'archived', isNew}
 let entries = {};  // id -> {id, day, start, dur, text, project, label, permesso, exported}
+let dayTypes = {}; // 'YYYY-MM-DD' -> 'ferie'|'malattia'|'festivo'|'nonlav'  (override manuale)
+const DT_LABEL={ferie:'Ferie', malattia:'Malattia', festivo:'Festivo', nonlav:'Non lav.', chiusura:'Chiusura'};
+
+/* festività nazionali italiane: fisse + Pasqua/Pasquetta (algoritmo di Gauss) */
+function easterMonth(y){ const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1; return {m:mo,d:da}; }
+function holidaysOf(y){
+  const s=new Set(['01-01','01-06','04-25','05-01','06-02','08-15','11-01','12-08','12-25','12-26']);
+  const e=easterMonth(y); const ed=new Date(y,e.m-1,e.d); const em=new Date(y,e.m-1,e.d+1);
+  s.add(pad(ed.getMonth()+1)+'-'+pad(ed.getDate())); s.add(pad(em.getMonth()+1)+'-'+pad(em.getDate()));
+  if(cfg.patronDate) s.add(cfg.patronDate); // 'MM-DD'
+  return s;
+}
+function autoType(k){
+  const d=fromKey(k), dow=d.getDay();
+  if(cfg.closures && cfg.closures.includes(k)) return 'chiusura';
+  if(dow===0||dow===6) return 'nonlav';
+  if(holidaysOf(d.getFullYear()).has(k.slice(5))) return 'festivo';
+  return null;
+}
+function dayTypeOf(k){ return dayTypes[k] || autoType(k); }
 let dict = {};     // token -> {p:{name:n}, l:{label:n}}
 let weekStart = monday(new Date());
 let saveTimer=null, dirty=false;
@@ -374,6 +409,7 @@ function updateDirty(){ const d=document.getElementById('dirtydot'); if(d) d.hid
 function markDirty(){ dirty=true; updateDirty(); }
 function saveEntries(){ markDirty(); clearTimeout(saveTimer); saveTimer=setTimeout(()=>sSet('ore-entries',entries),350); }
 function saveCfg(){ markDirty(); sSet('ore-cfg',cfg); }
+function saveDayTypes(){ markDirty(); sSet('ore-daytypes',dayTypes); }
 function saveDict(){ markDirty(); sSet('ore-dict',dict); }
 
 /* ================= suggerimenti ================= */
@@ -491,9 +527,11 @@ function renderAll(){
     if(k===todayK){ const n=new Date(); const mm=n.getHours()*60+n.getMinutes();
       if(mm>=DAY_START&&mm<=DAY_END) nowHtml=`<div class="nowline" style="top:${((mm-DAY_START)/SLOT*SLOT_PX).toFixed(1)}px"><span></span></div>`; }
     const totTxt = (assigned?fmtOre(assigned)+' h':'')+(raw?` <span class="raw">+${fmtOre(raw)}?</span>`:'');
+    const dtk=dayTypeOf(k);
+    const dtTag = dtk ? `<span class="dt-tag ${dtk}">${DT_LABEL[dtk]}</span>` : '';
     html+=`<div class="day${k===todayK?' today':''}" data-day="${k}">
-      <div class="dhead"><span class="dn">${DOW[(d.getDay()+6)%7]} <b>${d.getDate()}</b></span><span class="dtot">${totTxt||'&nbsp;'}</span></div>
-      <div class="dbody" data-day="${k}">${blocks}${nowHtml}</div></div>`;
+      <div class="dhead" data-dayhead="${k}"><span class="dn">${DOW[(d.getDay()+6)%7]} <b>${d.getDate()}</b></span>${dtTag}<span class="dtot">${totTxt||'&nbsp;'}</span></div>
+      <div class="dbody${dtk?' dt-'+dtk:''}" data-day="${k}">${blocks}${nowHtml}</div></div>`;
   }
   cal.innerHTML=html;
 
@@ -538,6 +576,9 @@ function buildFilterOptions(){
 /* ================= interazioni calendario ================= */
 function snap(y){ return DAY_START + Math.floor(y/SLOT_PX)*SLOT; }
 function bindCalendar(){
+  document.querySelectorAll('[data-dayhead]').forEach(h=>{
+    h.addEventListener('click',()=>openDayType(h.dataset.dayhead));
+  });
   document.querySelectorAll('.blk').forEach(el=>{
     const id=el.dataset.id;
     el.addEventListener('mouseenter',()=>{ hoverEntryId=id; });
@@ -890,6 +931,217 @@ function openUserPicker(){
   });
 }
 
+/* ================= generazione cartellino su modello ================= */
+const MONTHS_IT=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+const STD=[ '09:30','13:00','14:00','18:30' ]; // mattina inizio/fine, pomeriggio inizio/fine
+
+/* finestre di presenza di un giorno: dai blocchi-lavoro ricostruisce gli intervalli,
+   sottraendo i permessi, e li incastra nelle 2 colonne mattina/pomeriggio del cartellino */
+function presenceWindows(k){
+  const work=Object.values(entries).filter(e=>e.day===k && !e.permesso && e.project && e.label)
+    .map(e=>[e.start,e.start+e.dur]).sort((a,b)=>a[0]-b[0]);
+  if(!work.length) return null;
+  // fondo gli intervalli contigui/sovrapposti
+  const merged=[]; for(const w of work){ const last=merged[merged.length-1];
+    if(last && w[0]<=last[1]) last[1]=Math.max(last[1],w[1]); else merged.push([...w]); }
+  const hhmm=m=>pad(Math.floor(m/60))+':'+pad(m%60);
+  return merged.map(w=>[hhmm(w[0]),hhmm(w[1])]);
+}
+
+document.getElementById('cartTemplateInput').addEventListener('change',ev=>{
+  const f=ev.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const b64=btoa(String.fromCharCode(...new Uint8Array(rd.result)));
+      cfg.cartTemplate=b64; cfg.cartTemplateName=f.name; saveCfg();
+      toast('Modello cartellino caricato.');
+      if(document.querySelector('.modal')) openCartellino();
+    }catch(e){ toast('Non riesco a leggere il modello: '+e.message); }
+    ev.target.value='';
+  };
+  rd.readAsArrayBuffer(f);
+});
+
+function openCartExport(){
+  const root=document.getElementById('modalroot');
+  const now=new Date(); let my=now.getFullYear(), mm=now.getMonth();
+  const draw=()=>{
+    root.querySelector('#cmlabel').textContent=MONTHS_IT[mm]+' '+my;
+  };
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:460px">
+    <div class="mhead"><h2>Genera cartellino</h2><button class="x" id="mx">×</button></div>
+    <div class="hint" style="margin-bottom:12px">Riempie il modello con i tuoi giorni: presenze ricostruite dai blocchi, ferie/malattia/permessi dai tipi giornata. Intestazioni e formule restano intatte.</div>
+    <div class="wknav" style="justify-content:center;margin-bottom:14px">
+      <button class="wbtn" id="cmprev">‹</button>
+      <span class="wcount" id="cmlabel" style="min-width:140px;text-align:center"></span>
+      <button class="wbtn" id="cmnext">›</button>
+    </div>
+    <div class="mfoot"><div class="grow"></div><button class="btn primary" id="cmgo">Scarica .xlsx</button></div>
+  </div></div>`;
+  root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
+  root.querySelector('#cmprev').onclick=()=>{ mm--; if(mm<0){mm=11;my--;} draw(); };
+  root.querySelector('#cmnext').onclick=()=>{ mm++; if(mm>11){mm=0;my++;} draw(); };
+  root.querySelector('#cmgo').onclick=()=>genCartellino(my,mm);
+  draw();
+}
+
+function genCartellino(year, month){
+  if(typeof XLSX==='undefined'){ toast('Libreria Excel non caricata.'); return; }
+  if(!cfg.cartTemplate){ toast('Manca il modello cartellino.'); return; }
+  try{
+    const bytes=Uint8Array.from(atob(cfg.cartTemplate), c=>c.charCodeAt(0));
+    const wb=XLSX.read(bytes,{type:'array',cellStyles:true,cellNF:true});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    // intestazione: anno (A4), mese (C4), matricola (F4), nome (K4)
+    const set=(addr,v)=>{ ws[addr]=ws[addr]||{}; ws[addr].v=v; ws[addr].t=typeof v==='number'?'n':'s'; delete ws[addr].f; };
+    set('A4', year);
+    set('C4', MONTHS_IT[month]);
+    if(cfg.cartMat) set('F4', isNaN(+cfg.cartMat)?cfg.cartMat:+cfg.cartMat);
+    if(cfg.cartName) set('K4', cfg.cartName);
+    // le righe giorno partono da 7 (giorno 1) fino a 7+gg-1
+    const daysIn=new Date(year,month+1,0).getDate();
+    const COLS={stato:'C',d:'D',e:'E',f:'F',g:'G',h:'H',i:'I',j:'J',ka:'K',mal:'P',perm:'Q',fer:'R'};
+    const t2x=hhmm=>{ const [h,m]=hhmm.split(':').map(Number); return (h*60+m)/1440; };
+    for(let day=1; day<=daysIn; day++){
+      const row=6+day; const k=`${year}-${pad(month+1)}-${pad(day)}`;
+      const dt=dayTypeOf(k);
+      // pulisco le celle editabili della riga (non tocco L,M,N,O che hanno formule)
+      for(const col of ['C','D','E','F','G','H','I','J','K','P','Q','R']){ const a=col+row; if(ws[a]){ delete ws[a].v; delete ws[a].f; ws[a].t='z'; } }
+      if(dt==='ferie'||dt==='chiusura'){ set(COLS.fer+row, 1); set(COLS.stato+row,'Ferie'); continue; }
+      if(dt==='malattia'){ set(COLS.mal+row, 1); set(COLS.stato+row,'Malattia'); continue; }
+      if(dt==='festivo'||dt==='nonlav'){ continue; } // riga vuota
+      // giorno lavorativo: ricostruisco le finestre dai blocchi
+      const wins=presenceWindows(k);
+      set(COLS.stato+row,'Lavoro');
+      let slots;
+      if(!wins){ slots=[STD[0],STD[1],STD[2],STD[3]]; } // nessun blocco: assumo giornata piena
+      else {
+        // incastro le finestre nelle 4 colonne D,E,F,G (e H,I,J,K se servono 3+)
+        slots=[];
+        for(const w of wins){ slots.push(w[0],w[1]); }
+      }
+      const cells=['D','E','F','G','H','I','J','K']; // 4 coppie: (D-E),(F-G),(H-I),(J-K)
+      for(let i=0;i<slots.length && i<cells.length;i++){
+        const a=cells[i]+row; ws[a]={t:'n', v:t2x(slots[i]), z:'hh:mm'};
+      }
+      if(slots.length>8) toast('Giorno '+day+': più di 4 fasce, controlla a mano.');
+    }
+    const fname=`Cartellino_${cfg.cartName?cfg.cartName.split(' ').pop():'AFe'}_${String(year).slice(2)}_${pad(month+1)}.xlsx`;
+    XLSX.writeFile(wb, fname);
+    document.getElementById('modalroot').innerHTML='';
+    toast('Cartellino generato: '+fname+' — controlla e completa eventuali permessi parziali.');
+  }catch(e){ toast('Errore nella generazione: '+e.message); logBug('genCartellino: '+e.message,'','','',e.stack); }
+}
+
+/* ================= impostazioni cartellino ================= */
+function openCartellino(){
+  const root=document.getElementById('modalroot');
+  cfg.closures=cfg.closures||[];
+  const draw=()=>{
+    const cl=[...cfg.closures].sort();
+    root.querySelector('#cllist').innerHTML = cl.length
+      ? cl.map(k=>`<div class="pitem"><span class="nm">${esc(DOW[(fromKey(k).getDay()+6)%7])} ${esc(euDate(k))}</span><button class="btn" data-del="${k}">Togli</button></div>`).join('')
+      : '<div class="hint">Nessuna chiusura. Aggiungine una qui sopra: vale come ferie per il calcolo.</div>';
+    root.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ cfg.closures=cfg.closures.filter(x=>x!==b.dataset.del); saveCfg(); draw(); renderAll(); });
+  };
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:560px">
+    <div class="mhead"><h2>Impostazioni cartellino</h2><button class="x" id="mx">×</button></div>
+
+    <div class="inline">
+      <div class="frow"><label>Cognome e nome</label><input type="text" id="cname" value="${esc(cfg.cartName||'')}" placeholder="Alessandro Festuccia"></div>
+      <div class="frow" style="max-width:120px"><label>Matricola</label><input type="text" id="cmat" value="${esc(cfg.cartMat||'')}" placeholder="1"></div>
+    </div>
+
+    <div class="psec">Santo patrono</div>
+    <button class="btn" id="ppatron" style="width:100%;justify-content:flex-start">Patrono: ${cfg.patronDate?esc((cfg.patronName?cfg.patronName+' ':'')+cfg.patronDate.split('-').reverse().join('/')):'— non impostato'}</button>
+
+    <div class="psec">Chiusure aziendali</div>
+    <div class="inline" style="align-items:flex-end">
+      <div class="frow" style="margin-bottom:8px"><label>Aggiungi data</label><input type="date" id="cladd"></div>
+      <button class="btn" id="claddbtn" style="margin-bottom:8px">Aggiungi</button>
+    </div>
+    <div id="cllist"></div>
+
+    <div class="psec">Modello del cartellino</div>
+    <div class="hint" style="margin-bottom:6px">${cfg.cartTemplate?('Modello caricato ✓ ('+esc(cfg.cartTemplateName||'file')+')'):'Carica un tuo cartellino vuoto: verrà usato come modello, riempiendo solo i giorni e lasciando intatte intestazioni e formule.'}</div>
+    <button class="btn" id="ctmpl">Carica modello cartellino (.xlsx)</button>
+
+    <div class="mfoot">
+      <button class="btn" id="cartsave">Salva impostazioni</button>
+      <div class="grow"></div>
+      <button class="btn primary" id="cartexp" ${cfg.cartTemplate?'':'disabled'}>Genera cartellino del mese…</button>
+    </div>
+    ${cfg.cartTemplate?'':'<div class="hint">Per generare il cartellino serve prima caricare il modello.</div>'}
+  </div></div>`;
+  const close=()=>{root.innerHTML='';renderAll();};
+  root.querySelector('#mx').onclick=close;
+  ovGuard(root.querySelector('#ov'), close);
+  root.querySelector('#ppatron').onclick=()=>openPatron();
+  root.querySelector('#claddbtn').onclick=()=>{ const v=root.querySelector('#cladd').value; if(v&&!cfg.closures.includes(v)){ cfg.closures.push(v); saveCfg(); draw(); renderAll(); } };
+  root.querySelector('#ctmpl').onclick=()=>{ cartTemplateInput.click(); };
+  root.querySelector('#cartsave').onclick=()=>{
+    cfg.cartName=root.querySelector('#cname').value.trim()||null;
+    cfg.cartMat=root.querySelector('#cmat').value.trim()||null;
+    saveCfg(); toast('Impostazioni cartellino salvate.');
+  };
+  root.querySelector('#cartexp').onclick=()=>{
+    cfg.cartName=root.querySelector('#cname').value.trim()||null;
+    cfg.cartMat=root.querySelector('#cmat').value.trim()||null; saveCfg();
+    openCartExport();
+  };
+  draw();
+}
+
+/* ================= patrono ================= */
+function openPatron(){
+  const root=document.getElementById('modalroot');
+  const cur=cfg.patronDate||''; const y=new Date().getFullYear();
+  const val = cur ? y+'-'+cur : '';
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:440px">
+    <div class="mhead"><h2>Santo patrono</h2><button class="x" id="mx">×</button></div>
+    <div class="hint" style="margin-bottom:12px">Il giorno del patrono locale diventa festivo ogni anno. Per i comuni con più frazioni, scegli quella che vale per te.</div>
+    <div class="frow"><label>Nome (facoltativo)</label><input type="text" id="patname" placeholder="es. San Giovanni" value="${esc(cfg.patronName||'')}"></div>
+    <div class="frow"><label>Giorno</label><input type="date" id="patday" value="${val}"></div>
+    <div class="mfoot"><button class="btn danger" id="patclr" ${cur?'':'disabled'}>Rimuovi</button><div class="grow"></div>
+      <button class="btn" id="patcanc">Annulla</button><button class="btn primary" id="patok">Salva</button></div>
+  </div></div>`;
+  const close=()=>{root.innerHTML='';renderAll();};
+  root.querySelector('#mx').onclick=root.querySelector('#patcanc').onclick=()=>{root.innerHTML='';};
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
+  root.querySelector('#patclr').onclick=()=>{ delete cfg.patronDate; delete cfg.patronName; saveCfg(); close(); };
+  root.querySelector('#patok').onclick=()=>{
+    const v=root.querySelector('#patday').value;
+    if(v){ cfg.patronDate=v.slice(5); cfg.patronName=root.querySelector('#patname').value.trim()||null; saveCfg(); }
+    close();
+  };
+}
+
+/* ================= tipo giornata ================= */
+function openDayType(k){
+  const root=document.getElementById('modalroot');
+  const d=fromKey(k);
+  const auto=autoType(k), cur=dayTypes[k];
+  const dateLabel=DOW[(d.getDay()+6)%7]+' '+d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear();
+  const opt=(val,lab)=>`<button type="button" class="chip ${cur===val?'sel':''}" data-dt="${val}">${lab}</button>`;
+  root.innerHTML=`<div class="overlay" id="ov"><div class="modal" style="max-width:430px">
+    <div class="mhead"><h2>${dateLabel}</h2><button class="x" id="mx">×</button></div>
+    <div class="hint" style="margin-bottom:10px">${auto?('Di default: <b>'+DT_LABEL[auto]+'</b> (automatico).'):'Giorno lavorativo.'} Marca diversamente se serve — puoi comunque inserire attività.</div>
+    <div class="chips">
+      ${opt('ferie','Ferie')}${opt('malattia','Malattia')}${opt('festivo','Festivo')}${opt('nonlav','Non lavorativo')}${opt('chiusura','Chiusura aziendale')}
+      <button type="button" class="chip ${!cur?'sel':''}" data-dt="">${auto?'Auto ('+DT_LABEL[auto]+')':'Lavorativo'}</button>
+    </div>
+  </div></div>`;
+  root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
+  ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
+  root.querySelectorAll('[data-dt]').forEach(b=>b.onclick=()=>{
+    const v=b.dataset.dt;
+    if(!v) delete dayTypes[k]; else dayTypes[k]=v;
+    saveDayTypes(); root.innerHTML=''; renderAll();
+  });
+}
+
 /* ================= riepilogo permessi ================= */
 function openPermessi(){
   const root=document.getElementById('modalroot');
@@ -1143,6 +1395,10 @@ function backupRows(){
   for(const p of cfg.projects) cf.push(['progetto',p.name,p.state,p.isNew?1:0,p.hue!=null?p.hue:'']);
   for(const l of cfg.labels) cf.push(['etichetta',l,'','']);
   for(const [t,d] of Object.entries(dict)) cf.push(['dict',t,JSON.stringify(d.p),JSON.stringify(d.l)]);
+  if(cfg.patronDate) cf.push(['patrono',cfg.patronName||'',cfg.patronDate,'']);
+  if(cfg.cartName||cfg.cartMat) cf.push(['cart',cfg.cartName||'',cfg.cartMat||'','']);
+  for(const k of (cfg.closures||[])) cf.push(['chiusura',k,'','']);
+  for(const [k,v] of Object.entries(dayTypes)) cf.push(['giorno',k,v,'']);
   return {bl,cf};
 }
 function applyBackup(bl,cf){
@@ -1154,21 +1410,31 @@ function applyBackup(bl,cf){
       permesso:!!+(r[7]||0), exported:!!+(r[8]||0),
       created:r[9]?String(r[9]):null, seq:r[10]?+r[10]:0 };
   }
-  const C={projects:[],labels:[],sheets:[],user:null}, D={};
+  const C={projects:[],labels:[],sheets:[],user:null}, D={}, DT={};
+  let patronN=null, patronD=null;
   for(let i=1;i<cf.length;i++){ const r=cf[i]; if(!r||!r[0]) continue;
     if(r[0]==='progetto') C.projects.push({name:String(r[1]),code:String(r[1]).split(' - ')[0].trim(),state:r[2]==='active'?'active':'archived',isNew:!!+(r[3]||0),hue:(r[4]==null||r[4]==='')?null:+r[4]});
     else if(r[0]==='etichetta') C.labels.push(String(r[1]));
     else if(r[0]==='utente'){ if(r[1]) C.user=String(r[1]); }
     else if(r[0]==='foglio') C.sheets.push(String(r[1]));
     else if(r[0]==='dict'){ try{ D[String(r[1])]={p:JSON.parse(r[2]||'{}'),l:JSON.parse(r[3]||'{}')}; }catch(e){} }
+    else if(r[0]==='patrono'){ patronN=r[1]?String(r[1]):null; patronD=r[2]?String(r[2]):null; }
+    else if(r[0]==='cart'){ C.cartName=r[1]?String(r[1]):null; C.cartMat=r[2]?String(r[2]):null; }
+    else if(r[0]==='chiusura'){ if(r[1]){ (C.closures=C.closures||[]).push(String(r[1])); } }
+    else if(r[0]==='giorno'){ if(r[1]&&r[2]) DT[String(r[1])]=String(r[2]); }
   }
+  C.patronName=patronN; C.patronDate=patronD; C.dayTypes=DT;
   return {E,C,D};
 }
 function doRestore(E,C,D){
   entries=E; if(C.projects.length) cfg.projects=C.projects; if(C.labels.length) cfg.labels=C.labels;
   if(C.sheets.length) cfg.sheets=C.sheets; if(C.user) cfg.user=C.user; dict=D;
+  if(C.patronDate){ cfg.patronDate=C.patronDate; cfg.patronName=C.patronName; }
+  if(C.cartName!=null) cfg.cartName=C.cartName; if(C.cartMat!=null) cfg.cartMat=C.cartMat;
+  if(C.closures) cfg.closures=C.closures;
+  if(C.dayTypes) dayTypes=C.dayTypes;
   ensureHues(false);
-  sSet('ore-entries',entries); sSet('ore-cfg',cfg); sSet('ore-dict',dict);
+  sSet('ore-entries',entries); sSet('ore-cfg',cfg); sSet('ore-dict',dict); sSet('ore-daytypes',dayTypes);
   buildKw(); dirty=false; updateDirty();
   document.getElementById('modalroot').innerHTML='';
   renderAll();
@@ -1238,6 +1504,7 @@ document.addEventListener('keydown',ev=>{
   }
 });
 document.getElementById('bproj').onclick=openProjects;
+document.getElementById('bcart').onclick=openCartellino;
 document.getElementById('bexp').onclick=()=>openExport();
 document.getElementById('bics').onclick=openIcsDialog;
 document.getElementById('bsave').onclick=saveXlsx;
@@ -1248,6 +1515,7 @@ document.getElementById('rawcount').onclick=()=>openWizard();
   const c=await sGet('ore-cfg'); if(c) cfg=c;
   const e=await sGet('ore-entries'); if(e) entries=e;
   const d=await sGet('ore-dict'); if(d) dict=d;
+  const dts=await sGet('ore-daytypes'); if(dts) dayTypes=dts;
   const bg=await sGet('ore-bugs'); if(bg) bugLog=bg;
   const av=document.getElementById('appver'); if(av) av.textContent=APP_VER;
   updateBugBadge();
