@@ -202,7 +202,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v26</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v28</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -241,7 +241,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v26';
+const APP_VER='v28';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
@@ -936,17 +936,32 @@ function openUserPicker(){
 const MONTHS_IT=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 const STD=[ '09:30','13:00','14:00','18:30' ]; // mattina inizio/fine, pomeriggio inizio/fine
 
-/* finestre di presenza di un giorno: dai blocchi-lavoro ricostruisce gli intervalli,
-   sottraendo i permessi, e li incastra nelle 2 colonne mattina/pomeriggio del cartellino */
-function presenceWindows(k){
-  const work=Object.values(entries).filter(e=>e.day===k && !e.permesso && e.project && e.label)
-    .map(e=>[e.start,e.start+e.dur]).sort((a,b)=>a[0]-b[0]);
-  if(!work.length) return null;
-  // fondo gli intervalli contigui/sovrapposti
-  const merged=[]; for(const w of work){ const last=merged[merged.length-1];
-    if(last && w[0]<=last[1]) last[1]=Math.max(last[1],w[1]); else merged.push([...w]); }
+/* fasce di presenza di un giorno LAVORATIVO per il cartellino:
+   parte dalle 2 fasce standard (9:30-13:00, 14:00-18:30) e sottrae i permessi
+   registrati nel calendario, arrotondati alla mezz'ora. */
+const STD_MIN=[[570,780],[840,1110]]; // 9:30-13:00, 14:00-18:30 in minuti
+function roundHalf(min){ return Math.round(min/30)*30; } // arrotonda alla mezz'ora
+function workdayWindows(k){
+  // permessi del giorno (blocchi marcati permesso), arrotondati a step di 30 min
+  const perms=Object.values(entries).filter(e=>e.day===k && e.permesso)
+    .map(e=>{ let s=roundHalf(e.start), en=roundHalf(e.start+e.dur); return [s, Math.max(en,s+30)]; })
+    .sort((a,b)=>a[0]-b[0]);
   const hhmm=m=>pad(Math.floor(m/60))+':'+pad(m%60);
-  return merged.map(w=>[hhmm(w[0]),hhmm(w[1])]);
+  let segs=STD_MIN.map(s=>[...s]);
+  // sottraggo ogni permesso dalle fasce standard
+  for(const [ps,pe] of perms){
+    const next=[];
+    for(const [ss,se] of segs){
+      if(pe<=ss || ps>=se){ next.push([ss,se]); continue; }       // nessuna sovrapposizione
+      if(ps<=ss && pe>=se) continue;                               // permesso copre tutta la fascia
+      if(ps>ss && pe<se){ next.push([ss,ps]); next.push([pe,se]); continue; } // buco in mezzo
+      if(ps<=ss) next.push([pe,se]);                               // taglia l'inizio
+      else next.push([ss,ps]);                                     // taglia la fine
+    }
+    segs=next;
+  }
+  // scarto frammenti < 15 min e converto
+  return segs.filter(([a,b])=>b-a>=15).map(([a,b])=>[hhmm(a),hhmm(b)]);
 }
 
 document.getElementById('cartTemplateInput').addEventListener('change',ev=>{
@@ -1049,6 +1064,26 @@ async function genCartellino(year, month){
       }
     }
 
+    function setCellFormula(addr, formula, fbVal, isText){
+      const m=xml.match(new RegExp('<c r="'+addr+'"([^>]*?)(?:/>|>.*?</c>)','s'));
+      let style=''; if(m){ const sm=m[1].match(/\ss="(\d+)"/); if(sm) style=' s="'+sm[1]+'"'; }
+      const vEl = isText ? '<v>'+xmlEsc(String(fbVal))+'</v>' : '<v>'+fbVal+'</v>';
+      const tAttr = isText ? ' t="str"' : '';
+      const cell='<c r="'+addr+'"'+style+tAttr+'><f>'+xmlEsc(formula)+'</f>'+vEl+'</c>';
+      if(m) xml=xml.replace(m[0], cell);
+      else { const rowNum=addr.match(/\d+/)[0]; const rowRe=new RegExp('(<row r="'+rowNum+'"[^>]*>)(.*?)(</row>)','s'); const rm=xml.match(rowRe); if(rm) xml=xml.replace(rm[0], rm[1]+rm[2]+cell+rm[3]); }
+    }
+
+    function setCellM(row){
+      const addr='M'+row;
+      const m=xml.match(new RegExp('<c r="'+addr+'"([^>]*?)(?:/>|>.*?</c>)','s'));
+      let style=''; if(m){ const sm=m[1].match(/\ss="(\d+)"/); if(sm) style=' s="'+sm[1]+'"'; }
+      const f=`ROUND(((E${row}-D${row})+(G${row}-F${row})+(I${row}-H${row})+(K${row}-J${row}))*24,2)`;
+      const cell='<c r="'+addr+'"'+style+'><f>'+f+'</f></c>';
+      if(m) xml=xml.replace(m[0], cell);
+      else { const rowRe=new RegExp('(<row r="'+row+'"[^>]*>)(.*?)(</row>)','s'); const rm=xml.match(rowRe); if(rm) xml=xml.replace(rm[0], rm[1]+rm[2]+cell+rm[3]); }
+    }
+
     // intestazione: anno, mese (numero seriale data 1° del mese, mostrato come mmmm), matricola, nome
     setCell('A4','n', year);
     const monthSerial=Math.round((new Date(Date.UTC(year,month,1)) - new Date(Date.UTC(1899,11,30)))/86400000);
@@ -1058,23 +1093,29 @@ async function genCartellino(year, month){
     if(cfg.cartName) setCell('K4','str', cfg.cartName);
 
     const daysIn=new Date(year,month+1,0).getDate();
+    const DOW_FULL=['domenica','lunedì','martedì','mercoledì','giovedì','venerdì','sabato'];
     let over=0;
     for(let day=1; day<=daysIn; day++){
       const row=6+day, k=`${year}-${pad(month+1)}-${pad(day)}`;
       const dt=dayTypeOf(k);
-      // colonna A: formula viva = giorno settimana da anno (A4) e mese (C4); B: numero giorno
-      setCell('A'+row,'f', 'TEXT(DATE(YEAR($C$4),MONTH($C$4),B'+row+'),"dddd")');
+      const dd=new Date(year,month,day);
+      // colonna A: formula viva (gggg = giorno in italiano su Excel) con valore di fallback già calcolato
+      const giorno=DOW_FULL[dd.getDay()];
+      setCellFormula('A'+row, 'TEXT(DATE(YEAR($C$4),MONTH($C$4),B'+row+'),"gggg")', giorno, true);
       setCell('B'+row,'n', day);
+      // colonna M (Ore Lavorate): formula indipendente arrotondata a 2 decimali (sostituisce le shared formula)
+      setCellM(row);
       for(const col of ['C','D','E','F','G','H','I','J','K','P','Q','R']) setCell(col+row,'blank');
       if(dt==='ferie'||dt==='chiusura'){ setCell('C'+row,'str','Ferie'); setCell('R'+row,'n',1); continue; }
       if(dt==='malattia'){ setCell('C'+row,'str','Malattia'); setCell('P'+row,'n',1); continue; }
-      if(dt==='festivo'||dt==='nonlav'){ continue; }
-      const wins=presenceWindows(k);
+      if(dt==='festivo'||dt==='nonlav'){ continue; } // riga vuota: weekend e festivi
+      // GIORNO LAVORATIVO: parto dallo standard. I permessi del calendario tagliano le fasce.
       setCell('C'+row,'str','Lavoro');
-      let slots; if(!wins) slots=[...STD]; else { slots=[]; for(const w of wins) slots.push(w[0],w[1]); }
+      const wins=workdayWindows(k); // fasce di presenza dopo aver tolto i permessi
+      const flat=[]; for(const w of wins) flat.push(w[0],w[1]);
       const cells=['D','E','F','G','H','I','J','K'];
-      for(let i=0;i<slots.length && i<cells.length;i++) setCell(cells[i]+row,'n', t2frac(slots[i]));
-      if(slots.length>8) over++;
+      for(let i=0;i<flat.length && i<cells.length;i++) setCell(cells[i]+row,'n', t2frac(flat[i]));
+      if(flat.length>8) over++;
     }
 
     zip.file(sheetPath, xml);
