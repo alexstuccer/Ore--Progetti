@@ -202,7 +202,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v30</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v31</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -241,7 +241,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v30';
+const APP_VER='v31';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
@@ -403,6 +403,7 @@ function autoType(k){
   return null;
 }
 function dayTypeOf(k){ return dayTypes[k] || autoType(k); }
+function isFreeDayAuto(k){ const d=fromKey(k), dow=d.getDay(); return dow===0||dow===6||holidaysOf(d.getFullYear()).has(k.slice(5)); }
 let dict = {};     // token -> {p:{name:n}, l:{label:n}}
 let weekStart = monday(new Date());
 let saveTimer=null, dirty=false;
@@ -1103,9 +1104,10 @@ async function genCartellino(year, month){
       // colonna M (Ore Lavorate): formula indipendente arrotondata a 2 decimali (sostituisce le shared formula)
       setCellM(row);
       for(const col of ['C','D','E','F','G','H','I','J','K','P','Q','R']) setCell(col+row,'blank');
-      if(dt==='ferie'||dt==='chiusura'){ setCell('C'+row,'str','Ferie'); setCell('R'+row,'n',1); continue; }
-      if(dt==='malattia'){ setCell('C'+row,'str','Malattia'); setCell('P'+row,'n',1); continue; }
-      if(dt==='festivo'||dt==='nonlav'){ continue; } // riga vuota: weekend e festivi
+      if(isFreeDayAuto(k)){ continue; } // weekend e festivi nazionali: riga vuota a prescindere, anche se marcati ferie
+      if(dt==='ferie'||dt==='chiusura'){ setCell('C'+row,'str','Lavoro'); setCell('R'+row,'n',1); continue; }
+      if(dt==='malattia'){ setCell('C'+row,'str','Lavoro'); setCell('P'+row,'n',1); continue; }
+      if(dt==='festivo'||dt==='nonlav'){ continue; } // marcati a mano come non lavorativi
       // GIORNO LAVORATIVO: parto dallo standard. I permessi del calendario tagliano le fasce.
       setCell('C'+row,'str','Lavoro');
       const wins=workdayWindows(k); // fasce di presenza dopo aver tolto i permessi
@@ -1234,12 +1236,26 @@ function openDayType(k){
       ${opt('ferie','Ferie')}${opt('malattia','Malattia')}${opt('festivo','Festivo')}${opt('nonlav','Non lavorativo')}${opt('chiusura','Chiusura aziendale')}
       <button type="button" class="chip ${!cur?'sel':''}" data-dt="">${auto?'Auto ('+DT_LABEL[auto]+')':'Lavorativo'}</button>
     </div>
+    <div class="frow" style="margin-top:12px"><label>Fino al (incluso) — per marcare più giorni in una volta</label><input type="date" id="dtuntil" min="${k}"></div>
+    <div class="hint">Con una data qui, la scelta vale dal ${d.getDate()} ${MON[d.getMonth()]} fino a quella data. Sabati, domeniche e festivi restano fuori: non vengono marcati.</div>
   </div></div>`;
   root.querySelector('#mx').onclick=()=>{root.innerHTML='';};
   ovGuard(root.querySelector('#ov'), ()=>{ root.innerHTML=''; });
   root.querySelectorAll('[data-dt]').forEach(b=>b.onclick=()=>{
     const v=b.dataset.dt;
-    if(!v) delete dayTypes[k]; else dayTypes[k]=v;
+    const until=root.querySelector('#dtuntil').value;
+    const apply=key=>{ if(!v) delete dayTypes[key]; else dayTypes[key]=v; };
+    if(until && until>k){
+      let cnt=0, skip=0, guard=0;
+      for(let dd=fromKey(k); dayKey(dd)<=until && guard<370; dd.setDate(dd.getDate()+1), guard++){
+        const key=dayKey(dd);
+        if(v && isFreeDayAuto(key)){ skip++; continue; }
+        apply(key); cnt++;
+      }
+      toast(cnt+' giorni marcati'+(skip?' ('+skip+' saltati: weekend/festivi)':'')+'.');
+    } else {
+      apply(k);
+    }
     saveDayTypes(); root.innerHTML=''; renderAll();
   });
 }
