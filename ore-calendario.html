@@ -202,7 +202,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v31</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v32</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -241,7 +241,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v31';
+const APP_VER='v32';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
@@ -1013,31 +1013,7 @@ async function genCartellino(year, month){
     const sheetPath='xl/worksheets/sheet1.xml';
     let xml=await zip.file(sheetPath).async('string');
 
-    // --- preparo uno stile "nascosto" (formato ;;;) per la cella di servizio B4 ---
-    let hiddenStyleIdx=null;
-    try{
-      let styles=await zip.file('xl/styles.xml').async('string');
-      if(!/numFmtId="170"/.test(styles)){
-        if(/<numFmts count="(\d+)"/.test(styles)){
-          styles=styles.replace(/<numFmts count="(\d+)">/, (m,n)=>`<numFmts count="${+n+1}">`)
-                       .replace('</numFmts>', '<numFmt numFmtId="170" formatCode=";;;"/></numFmts>');
-        } else {
-          styles=styles.replace('<cellXfs', '<numFmts count="1"><numFmt numFmtId="170" formatCode=";;;"/></numFmts><cellXfs');
-        }
-      }
-      const xfsM=styles.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
-      const xfList=xfsM[2].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g);
-      // clono lo stile attuale di A4 (anno) per ereditarne bordo/font, cambiando solo il formato
-      const a4=xml.match(/<c r="A4"([^>]*)/);
-      const a4s=a4 ? (a4[1].match(/\ss="(\d+)"/)||[])[1] : null;
-      let baseXf=(a4s!=null && xfList[+a4s]) ? xfList[+a4s] : '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>';
-      let newXf=baseXf.replace(/numFmtId="\d+"/, 'numFmtId="170"');
-      if(!/applyNumberFormat/.test(newXf)) newXf=newXf.replace('<xf ', '<xf applyNumberFormat="1" ');
-      hiddenStyleIdx=xfList.length;
-      styles=styles.replace(/<cellXfs count="\d+">/, `<cellXfs count="${xfList.length+1}">`)
-                   .replace('</cellXfs>', newXf+'</cellXfs>');
-      zip.file('xl/styles.xml', styles);
-    }catch(_){ hiddenStyleIdx=null; }
+    // il file generato resta = modello + valori: nessuna modifica a stili o celle di servizio
 
     const t2frac=hhmm=>{ const [h,m]=hhmm.split(':').map(Number); return ((h*60+m)/1440).toFixed(10).replace(/0+$/,'').replace(/\.$/,'.0'); };
     const xmlEsc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1086,7 +1062,6 @@ async function genCartellino(year, month){
     // intestazione: anno (A4), mese (C4 = testo "Giugno" maiuscolo), numero mese in B4 (servizio, nascosto), matricola, nome
     setCell('A4','n', year);
     setCell('C4','str', MONTHS_IT[month]);            // "Giugno" con maiuscola
-    setCell('B4', 'n', month+1, hiddenStyleIdx!=null?hiddenStyleIdx:undefined);  // numero mese, invisibile
     if(cfg.cartMat) setCell('F4', isNaN(+cfg.cartMat)?'str':'n', isNaN(+cfg.cartMat)?cfg.cartMat:+cfg.cartMat);
     if(cfg.cartName) setCell('K4','str', cfg.cartName);
 
@@ -1099,7 +1074,7 @@ async function genCartellino(year, month){
       const dd=new Date(year,month,day);
       // colonna A: formula viva (gggg = giorno in italiano su Excel) con valore di fallback già calcolato
       const giorno=DOW_FULL[dd.getDay()];
-      setCellFormula('A'+row, 'TEXT(DATE($A$4,$B$4,B'+row+'),"gggg")', giorno, true);
+      setCellFormula('A'+row, 'TEXT(DATE($A$4,'+(month+1)+',B'+row+'),"gggg")', giorno, true);
       setCell('B'+row,'n', day);
       // colonna M (Ore Lavorate): formula indipendente arrotondata a 2 decimali (sostituisce le shared formula)
       setCellM(row);
@@ -1118,6 +1093,7 @@ async function genCartellino(year, month){
     }
 
     zip.file(sheetPath, xml);
+    try{ zip.remove('xl/calcChain.xml'); }catch(_){}
     // forzo il ricalcolo delle formule all'apertura
     try{ let wbx=await zip.file('xl/workbook.xml').async('string');
       if(!/fullCalcOnLoad/.test(wbx)){ wbx=wbx.replace(/<calcPr([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
@@ -1126,7 +1102,7 @@ async function genCartellino(year, month){
     }catch(_){}
 
     const blob=await zip.generateAsync({type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const fname=`Cartellino_${cfg.cartName?cfg.cartName.split(' ').pop():'AFe'}_${String(year).slice(2)}_${pad(month+1)}.xlsx`;
+    const fname=`Cartellino_Presenze_${(cfg.cartId||cfg.user||'ID').replace(/[^A-Za-z0-9]/g,'')}_${String(year).slice(2)}_${pad(month+1)}.xlsx`;
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; a.click(); URL.revokeObjectURL(a.href);
     document.getElementById('modalroot').innerHTML='';
     toast('Cartellino generato: '+fname+(over?' — '+over+' giorni con +4 fasce, controllali':' — controlla i permessi parziali'));
@@ -1149,7 +1125,8 @@ function openCartellino(){
 
     <div class="inline">
       <div class="frow"><label>Cognome e nome</label><input type="text" id="cname" value="${esc(cfg.cartName||'')}" placeholder="Cognome Nome"></div>
-      <div class="frow" style="max-width:120px"><label>Matricola</label><input type="text" id="cmat" value="${esc(cfg.cartMat||'')}" placeholder="1"></div>
+      <div class="frow" style="max-width:110px"><label>Matricola</label><input type="text" id="cmat" value="${esc(cfg.cartMat||'')}" placeholder="1"></div>
+      <div class="frow" style="max-width:130px"><label>ID cartellino</label><input type="text" id="cid" value="${esc(cfg.cartId||cfg.user||'')}" placeholder="AFE"></div>
     </div>
 
     <div class="psec">Santo patrono</div>
@@ -1182,11 +1159,13 @@ function openCartellino(){
   root.querySelector('#cartsave').onclick=()=>{
     cfg.cartName=root.querySelector('#cname').value.trim()||null;
     cfg.cartMat=root.querySelector('#cmat').value.trim()||null;
+    cfg.cartId=root.querySelector('#cid').value.trim()||null;
     saveCfg(); toast('Impostazioni cartellino salvate.');
   };
   root.querySelector('#cartexp').onclick=()=>{
     cfg.cartName=root.querySelector('#cname').value.trim()||null;
-    cfg.cartMat=root.querySelector('#cmat').value.trim()||null; saveCfg();
+    cfg.cartMat=root.querySelector('#cmat').value.trim()||null;
+    cfg.cartId=root.querySelector('#cid').value.trim()||null; saveCfg();
     openCartExport();
   };
   draw();
@@ -1514,7 +1493,7 @@ function backupRows(){
   for(const l of cfg.labels) cf.push(['etichetta',l,'','']);
   for(const [t,d] of Object.entries(dict)) cf.push(['dict',t,JSON.stringify(d.p),JSON.stringify(d.l)]);
   if(cfg.patronDate) cf.push(['patrono',cfg.patronName||'',cfg.patronDate,'']);
-  if(cfg.cartName||cfg.cartMat) cf.push(['cart',cfg.cartName||'',cfg.cartMat||'','']);
+  if(cfg.cartName||cfg.cartMat||cfg.cartId) cf.push(['cart',cfg.cartName||'',cfg.cartMat||'',cfg.cartId||'']);
   for(const k of (cfg.closures||[])) cf.push(['chiusura',k,'','']);
   for(const [k,v] of Object.entries(dayTypes)) cf.push(['giorno',k,v,'']);
   return {bl,cf};
@@ -1537,7 +1516,7 @@ function applyBackup(bl,cf){
     else if(r[0]==='foglio') C.sheets.push(String(r[1]));
     else if(r[0]==='dict'){ try{ D[String(r[1])]={p:JSON.parse(r[2]||'{}'),l:JSON.parse(r[3]||'{}')}; }catch(e){} }
     else if(r[0]==='patrono'){ patronN=r[1]?String(r[1]):null; patronD=r[2]?String(r[2]):null; }
-    else if(r[0]==='cart'){ C.cartName=r[1]?String(r[1]):null; C.cartMat=r[2]?String(r[2]):null; }
+    else if(r[0]==='cart'){ C.cartName=r[1]?String(r[1]):null; C.cartMat=r[2]?String(r[2]):null; C.cartId=r[3]?String(r[3]):null; }
     else if(r[0]==='chiusura'){ if(r[1]){ (C.closures=C.closures||[]).push(String(r[1])); } }
     else if(r[0]==='giorno'){ if(r[1]&&r[2]) DT[String(r[1])]=String(r[2]); }
   }
@@ -1548,7 +1527,7 @@ function doRestore(E,C,D){
   entries=E; if(C.projects.length) cfg.projects=C.projects; if(C.labels.length) cfg.labels=C.labels;
   if(C.sheets.length) cfg.sheets=C.sheets; if(C.user) cfg.user=C.user; dict=D;
   if(C.patronDate){ cfg.patronDate=C.patronDate; cfg.patronName=C.patronName; }
-  if(C.cartName!=null) cfg.cartName=C.cartName; if(C.cartMat!=null) cfg.cartMat=C.cartMat;
+  if(C.cartName!=null) cfg.cartName=C.cartName; if(C.cartMat!=null) cfg.cartMat=C.cartMat; if(C.cartId!=null) cfg.cartId=C.cartId;
   if(C.closures) cfg.closures=C.closures;
   if(C.dayTypes) dayTypes=C.dayTypes;
   ensureHues(false);
