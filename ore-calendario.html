@@ -202,7 +202,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <header>
   <div class="hrow">
-    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v32</span></div>
+    <div class="brand">Ore<span class="sheet" id="whoami">·—</span><span class="ver" id="appver">v33</span></div>
     <div class="wknav">
       <button id="wmprev" title="Mese precedente">«</button>
       <button id="wprev" title="Settimana precedente">‹</button>
@@ -241,7 +241,7 @@ header{position:sticky;top:0;z-index:30;background:var(--surface);border-bottom:
 
 <script>
 /* ================= costanti & utility ================= */
-const APP_VER='v32';
+const APP_VER='v33';
 const DAY_START = 0, DAY_END = 24*60, SLOT = 15;
 const SLOT_PX = 14, COLH = (DAY_END-DAY_START)/SLOT*SLOT_PX;
 document.documentElement.style.setProperty('--colh', COLH+'px');
@@ -1091,6 +1091,12 @@ async function genCartellino(year, month){
       for(let i=0;i<flat.length && i<cells.length;i++) setCell(cells[i]+row,'n', t2frac(flat[i]));
       if(flat.length>8) over++;
     }
+    // righe dei giorni che il mese non ha: le svuoto del tutto (stile preservato)
+    for(let day=daysIn+1; day<=31; day++){
+      const row=6+day;
+      setCellM(row);
+      for(const col of ['A','B','C','D','E','F','G','H','I','J','K','P','Q','R']) setCell(col+row,'blank');
+    }
 
     zip.file(sheetPath, xml);
     try{ zip.remove('xl/calcChain.xml'); }catch(_){}
@@ -1102,7 +1108,7 @@ async function genCartellino(year, month){
     }catch(_){}
 
     const blob=await zip.generateAsync({type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const fname=`Cartellino_Presenze_${(cfg.cartId||cfg.user||'ID').replace(/[^A-Za-z0-9]/g,'')}_${String(year).slice(2)}_${pad(month+1)}.xlsx`;
+    const fname=`Cartellino Presenze ${(cfg.cartId||cfg.user||'ID').replace(/[^A-Za-z0-9]/g,'').toUpperCase()} ${String(year).slice(2)}_${pad(month+1)}.xlsx`;
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fname; a.click(); URL.revokeObjectURL(a.href);
     document.getElementById('modalroot').innerHTML='';
     toast('Cartellino generato: '+fname+(over?' — '+over+' giorni con +4 fasce, controllali':' — controlla i permessi parziali'));
@@ -1126,7 +1132,7 @@ function openCartellino(){
     <div class="inline">
       <div class="frow"><label>Cognome e nome</label><input type="text" id="cname" value="${esc(cfg.cartName||'')}" placeholder="Cognome Nome"></div>
       <div class="frow" style="max-width:110px"><label>Matricola</label><input type="text" id="cmat" value="${esc(cfg.cartMat||'')}" placeholder="1"></div>
-      <div class="frow" style="max-width:130px"><label>ID cartellino</label><input type="text" id="cid" value="${esc(cfg.cartId||cfg.user||'')}" placeholder="AFE"></div>
+      <div class="frow" style="max-width:130px"><label>ID cartellino</label><input type="text" id="cid" value="${esc((cfg.cartId||cfg.user||'').toUpperCase())}" placeholder="AFE" style="text-transform:uppercase"></div>
     </div>
 
     <div class="psec">Santo patrono</div>
@@ -1159,13 +1165,13 @@ function openCartellino(){
   root.querySelector('#cartsave').onclick=()=>{
     cfg.cartName=root.querySelector('#cname').value.trim()||null;
     cfg.cartMat=root.querySelector('#cmat').value.trim()||null;
-    cfg.cartId=root.querySelector('#cid').value.trim()||null;
+    cfg.cartId=root.querySelector('#cid').value.trim().toUpperCase()||null;
     saveCfg(); toast('Impostazioni cartellino salvate.');
   };
   root.querySelector('#cartexp').onclick=()=>{
     cfg.cartName=root.querySelector('#cname').value.trim()||null;
     cfg.cartMat=root.querySelector('#cmat').value.trim()||null;
-    cfg.cartId=root.querySelector('#cid').value.trim()||null; saveCfg();
+    cfg.cartId=root.querySelector('#cid').value.trim().toUpperCase()||null; saveCfg();
     openCartExport();
   };
   draw();
